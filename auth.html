@@ -1,0 +1,26 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com/3.4.17"></script><script src="https://cdn.jsdelivr.net/npm/pocketbase@0.26.8/dist/pocketbase.umd.js"></script><script src="mock.js"></script><script src="app.js"></script><link rel="icon" href="logo.jpeg"><title>Account – Noble's Groceries</title></head>
+<body class="bg-emerald-950 min-h-screen flex items-center justify-center p-4">
+<div class="w-full max-w-md"><a href="index.html" class="flex flex-col items-center gap-2 font-bold text-white text-xl mb-6"><img src="logo.jpeg" alt="Noble's Groceries logo" class="w-20 h-20 rounded-xl">Noble's Groceries</a>
+<div class="bg-white rounded-xl shadow-xl p-6 sm:p-8">
+<div class="grid grid-cols-2 bg-slate-100 rounded-lg p-1 mb-6 text-sm font-medium"><button id="t-login" class="py-2 rounded-md">Log in</button><button id="t-register" class="py-2 rounded-md">Sign up</button></div>
+<form id="f" class="space-y-3"></form><p class="text-xs text-slate-500 mt-4 border-t pt-3">Demo accounts: <b>user@noble.com</b> / user12345 · <b>admin@noble.com</b> / admin12345</p><p id="err" class="text-sm text-red-600 mt-3"></p></div></div>
+<datalist id="c"><option>Nigeria<option>Ghana<option>Kenya<option>South Africa<option>United Kingdom<option>United States<option>Canada</datalist>
+<script>
+let mode=new URLSearchParams(location.search).get('mode')==='register'?'register':'login';
+function draw(){
+ ['login','register'].forEach(m=>$('#t-'+m).className='py-2 rounded-md '+(m===mode?'bg-white shadow':'text-slate-500'));
+ $('#f').innerHTML=(mode==='register'?fld('Full name','name','','text','required')+fld('Country','country','','text','required list="c"')+fld('Phone number','phone','','tel','required'):'')
+ +fld('Email','email','','email','required')+fld('Password','password','','password','required minlength="8"')
+ +(mode==='register'?fld('Confirm password','passwordConfirm','','password','required minlength="8"'):'')
+ +'<button class="px-4 py-2 text-sm font-medium rounded-lg bg-emerald-800 text-white hover:bg-emerald-900 w-full py-2.5">'+(mode==='register'?'Create account':'Log in')+'</button>';
+ $('#err').textContent='';
+}
+$('#t-login').onclick=()=>{mode='login';draw()};$('#t-register').onclick=()=>{mode='register';draw()};
+$('#f').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));
+ try{
+  if(mode==='register'){if(d.password!==d.passwordConfirm)throw new Error('Passwords do not match.');await pb.collection('users').create({...d,emailVisibility:true});}
+  await pb.collection('users').authWithPassword(d.email,d.password);
+  location.href=pb.authStore.record.role==='admin'?'admin.html':'dashboard.html';
+ }catch(x){const m=Object.values(x.response?.data||{}).map(v=>v.message).join(' ');$('#err').textContent=m||x.message}};
+draw();
+</script></body></html>
