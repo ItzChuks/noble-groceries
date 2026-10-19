@@ -33,7 +33,7 @@ Browser code can be edited by anyone, so the rules that matter are checked on th
 - **New accounts** are always `role = user`, even if the request says otherwise.
 - **Joining a plan**: the plan must be active; the subscription always starts as `active`.
 - **Payments**: the server recomputes the penalty, instalments covered and late count from its own clock and the member's history. A wrong amount (missing penalty, not a whole number of instalments, plan already fully paid) is rejected, and any `penalty` / `installments` / `late_count` / `status` sent by the browser is overwritten.
-- **Payouts**: only for a fully saved and admin-confirmed plan, one open request per plan.
+- **Payouts**: only for a fully saved and admin-confirmed plan, **and only after its saving period has ended** (the deadline of the last instalment). One open request per plan, and never again once a payout has been made.
 - Only admins can confirm or reject payments and payouts, edit plans, or change roles (collection rules).
 
 **Keep two files in sync:** the payment rules exist in `app.js` (`RULES`, for display) and in `pocketbase/pb_hooks/rules.js` (enforcement). If you change the noon cut-off, multiplier, weekly day or monthly grace day, change both.
@@ -44,3 +44,10 @@ Browser code can be edited by anyone, so the rules that matter are checked on th
 - Users' emails are visible to admins because sign-up sets `emailVisibility`.
 - In production, run PocketBase behind HTTPS and, in Settings > Application, restrict allowed origins if you want only your site to call it.
 - The `created` timestamp of a subscription is the "joined" time the first deadline is based on, so don't edit it.
+
+## Added in this version
+
+- **Saving period in months**: Admin > Plans > Add plan has a *Saving period (months)* field (1, 2, 3 or any number). The number of payments is worked out from the frequency (daily about 30.4 per month, weekly about 4.35, monthly 1) and shown live in the form. Needs the migration `1760000001_plans_months.js` in the backend.
+- **Payout waiting period**: members can request a payout only after the saving period ends; the button shows the date it opens.
+- **Customer support**: a WhatsApp button (floating, plus a sidebar link) on the member dashboard and the landing page. Change the number once in `app.js` (`SUPPORT_PHONE`); the landing page link in `index.html` uses the same number.
+- **Transaction history**: members see it under *Transaction history*; admins see a member's full history by selecting the member in Admin > Users, and all payments under Admin > Payments. Filter by date (presets or From/To), status, type and search. Download a PDF invoice or payout receipt per transaction, or a PDF statement of the filtered list. PDFs are built in the browser with jsPDF (loaded from cdnjs when needed) using `pdf.js`.
