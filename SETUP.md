@@ -51,3 +51,11 @@ Browser code can be edited by anyone, so the rules that matter are checked on th
 - **Payout waiting period**: members can request a payout only after the saving period ends; the button shows the date it opens.
 - **Customer support**: a WhatsApp button (floating, plus a sidebar link) on the member dashboard and the landing page. Change the number once in `app.js` (`SUPPORT_PHONE`); the landing page link in `index.html` uses the same number.
 - **Transaction history**: members see it under *Transaction history*; admins see a member's full history by selecting the member in Admin > Users, and all payments under Admin > Payments. Filter by date (presets or From/To), status, type and search. Download a PDF invoice or payout receipt per transaction, or a PDF statement of the filtered list. PDFs are built in the browser with jsPDF (loaded from cdnjs when needed) using `pdf.js`.
+
+## Real time, notifications and bulk delete
+
+- **Real time**: the member and admin pages subscribe to PocketBase's live updates (plans, contributions, payments, payouts, and users for admins). When something changes the page refreshes itself, except while someone is typing or has a pop-up open. It also catches up when the tab becomes active again and re-checks every 90 seconds as a safety net. Members only receive events for their own records (enforced by PocketBase's rules).
+- **Red counters**: in the admin sidebar, a red number appears beside *Payments* (pending payments) and *Payouts* (pending payout requests). A red dot shows on the phone menu button and the count appears in the browser tab title.
+- **Pop-ups instead of browser alerts**: deleting uses an in-page confirmation popup (`confirmBox()` in `app.js`, reusable for anything else).
+- **Delete several plans**: Admin > Plans has a checkbox on every plan and a *Select all* box (it selects the plans currently shown by the search/filters). A bar appears at the bottom with *Delete selected*. A plan that members have joined cannot be deleted (PocketBase protects it); it is skipped and reported, so hide it instead.
+- **Demo mode** (`USE_MOCK = true`) emulates real time too, for actions in the same tab.

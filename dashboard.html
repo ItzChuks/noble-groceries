@@ -88,6 +88,10 @@ layout({ brand: "Noble's Groceries", nav: [['overview', 'Overview'], ['plans', '
     const u = U(); m.innerHTML = head('Profile', 'Update your details.') + `<form id="pf2" class="bg-white border rounded-xl p-6 max-w-md space-y-3">${fld('Full name', 'name', u.name)}${fld('Country', 'country', u.country)}${fld('Phone', 'phone', u.phone)}<button class="${btn}">Save changes</button></form>`;
     $('#pf2').onsubmit = async e => { e.preventDefault(); try { await pb.collection('users').update(u.id, Object.fromEntries(new FormData(e.target))); toast('Saved'); } catch (x) { toast(x.message, 1); } };
   }
-}, support: true });
+}, support: true, live: ['plans', 'subscriptions', 'payments', 'payouts'], onLive: (c, e) => {
+  if (e.action !== 'update' || e.record.status === 'pending') return;
+  if (c === 'payments') toast('Your payment of ' + naira(e.record.amount) + ' was ' + e.record.status + '.', e.record.status === 'rejected');
+  if (c === 'payouts') toast('Your payout request was ' + (e.record.status === 'confirmed' ? 'approved' : e.record.status) + '.', e.record.status === 'rejected');
+} });
 }
 </script></body></html>

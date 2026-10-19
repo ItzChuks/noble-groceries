@@ -5,6 +5,11 @@ function createMockPB() {
   const KEY = 'noble_db_v2', REL = { user: 'users', plan: 'plans', subscription: 'subscriptions' };
   let db = JSON.parse(ls.get(KEY) || 'null');
   const save = () => ls.set(KEY, JSON.stringify(db));
+  // real-time emulation: listeners per collection; other open tabs are told through a BroadcastChannel
+  const L = {}, bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('noble_mock') : null;
+  const fire = (c, action, record) => (L[c] || []).forEach(cb => setTimeout(() => cb({ action, record }), 0));
+  const emit = (c, action, record) => { fire(c, action, record); if (bc) bc.postMessage({ c, action, record }); };
+  if (bc) bc.onmessage = e => { db = JSON.parse(ls.get(KEY) || 'null') || db; fire(e.data.c, e.data.action, e.data.record); };
   const uid = () => Math.random().toString(36).slice(2, 12).padEnd(10, '0');
   const now = (age = 0) => new Date(Date.now() - age * 864e5).toISOString().replace('T', ' ').slice(0, 19);
   const add = (c, o, age = 0) => { const r = { id: uid(), created: now(age), ...o }; db[c].push(r); return r; };
@@ -39,10 +44,16 @@ function createMockPB() {
     async create(d) {
       d = { ...d }; delete d.passwordConfirm;
       if (c === 'users') { if (db.users.some(u => u.email === d.email)) throw new Error('That email is already registered.'); d.role = 'user'; }
-      const r = { id: uid(), created: now(), ...d }; db[c].push(r); save(); return r;
+      const r = { id: uid(), created: now(), ...d }; db[c].push(r); save(); emit(c, 'create', r); return r;
     },
-    async update(id, d) { const r = db[c].find(x => x.id === id); if (!r) throw new Error('Record not found.'); Object.assign(r, d); save(); return r; },
-    async delete(id) { db[c] = db[c].filter(x => x.id !== id); save(); return true; },
+    async update(id, d) { const r = db[c].find(x => x.id === id); if (!r) throw new Error('Record not found.'); Object.assign(r, d); save(); emit(c, 'update', r); return r; },
+    async delete(id) {
+      const r = db[c].find(x => x.id === id);
+      if (c === 'plans' && db.subscriptions.some(x => x.plan === id)) throw new Error('Failed to delete record. Make sure that the record is not part of a required relation reference.');
+      db[c] = db[c].filter(x => x.id !== id); save(); if (r) emit(c, 'delete', r); return true;
+    },
+    async subscribe(topic, cb) { (L[c] = L[c] || []).push(cb); return () => { L[c] = (L[c] || []).filter(x => x !== cb); }; },
+    async unsubscribe() { L[c] = []; },
     async authRefresh() { return { record: authStore.model }; },
     async authWithPassword(e, p) {
       const u = db.users.find(x => x.email === e && x.password === p); if (!u) throw new Error('Invalid email or password.');

@@ -164,11 +164,12 @@ const head = (t, sub, action = '') => `<div class="flex flex-wrap items-end just
 const stat = (l, v, s = '') => `<div class="bg-white border rounded-xl p-4 sm:p-5 min-w-0"><p class="text-[11px] sm:text-xs font-medium uppercase tracking-wide text-slate-500">${l}</p><p class="text-xl sm:text-2xl font-semibold text-slate-900 mt-1.5 sm:mt-2 break-words">${v}</p>${s ? `<p class="text-xs text-slate-500 mt-1">${s}</p>` : ''}</div>`;
 const table = (heads, rows) => {
   if (!rows.length) return `<div class="bg-white border border-dashed rounded-xl p-10 text-center text-slate-500 text-sm">Nothing here yet.</div>`;
-  const desk = `<div class="hidden md:block bg-white border rounded-xl overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>${heads.map(h => `<th class="px-4 py-3 font-medium whitespace-nowrap">${h}</th>`).join('')}</tr></thead><tbody class="divide-y">${rows.map(r => `<tr class="hover:bg-slate-50/60">${r.map(c => `<td class="px-4 py-3 whitespace-nowrap">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const desk = `<div class="hidden md:block bg-white border rounded-xl overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>${heads.map(h => h === 'SEL' ? '<th class="pl-4 pr-0 py-3 w-8"></th>' : `<th class="px-4 py-3 font-medium whitespace-nowrap">${h}</th>`).join('')}</tr></thead><tbody class="divide-y">${rows.map(r => `<tr class="hover:bg-slate-50/60">${r.map(c => `<td class="px-4 py-3 whitespace-nowrap">${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   const cards = `<div class="md:hidden space-y-3">${rows.map(r => {
-    const body = r.map((c, i) => heads[i] && c !== '' ? `<div class="flex items-start justify-between gap-4 py-1.5 text-sm"><dt class="text-slate-500 shrink-0">${heads[i]}</dt><dd class="text-right min-w-0 break-words text-slate-800">${c}</dd></div>` : '').join('');
+    const si = heads.indexOf('SEL');
+    const body = r.map((c, i) => heads[i] && i !== si && c !== '' ? `<div class="flex items-start justify-between gap-4 py-1.5 text-sm"><dt class="text-slate-500 shrink-0">${heads[i]}</dt><dd class="text-right min-w-0 break-words text-slate-800">${c}</dd></div>` : '').join('');
     const acts = r.filter((c, i) => !heads[i] && c !== '').join('');
-    return `<div class="bg-white border rounded-xl p-4"><dl class="divide-y">${body}</dl>${acts ? `<div class="flex flex-wrap gap-2 pt-3 mt-2 border-t">${acts}</div>` : ''}</div>`;
+    return `<div class="bg-white border rounded-xl p-4">${si >= 0 ? `<div class="flex items-center justify-between pb-2 mb-1 border-b text-xs font-medium text-slate-500"><span>Select</span>${r[si]}</div>` : ''}<dl class="divide-y">${body}</dl>${acts ? `<div class="flex flex-wrap gap-2 pt-3 mt-2 border-t">${acts}</div>` : ''}</div>`;
   }).join('')}</div>`;
   return desk + cards;
 };
@@ -177,7 +178,7 @@ const sel = (label, name, opts, val) => `<label class="block text-sm"><span clas
 
 function modal(title, body, onSubmit, cta = 'Save') {
   const d = document.createElement('div');
-  d.className = 'fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4';
+  d.className = 'fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4'; d.setAttribute('data-ui', 'modal');
   d.innerHTML = `<form class="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-3 max-h-[90dvh] overflow-y-auto"><h3 class="font-semibold text-slate-900">${title}</h3>${body}<div class="flex justify-end gap-2 pt-2"><button type="button" class="c ${btn2}">Cancel</button><button class="${btn}">${cta}</button></div></form>`;
   document.body.appendChild(d);
   $('.c', d).onclick = () => d.remove();
@@ -186,6 +187,25 @@ function modal(title, body, onSubmit, cta = 'Save') {
     try { await onSubmit(Object.fromEntries(new FormData(e.target))); d.remove(); refresh(); }
     catch (x) { toast(x.message, 1); }
   };
+}
+
+// Styled replacement for the browser's confirm(). Resolves true when confirmed, false when cancelled (button, Esc or click outside).
+function confirmBox({ title, message = '', confirmText = 'Confirm', cancelText = 'Cancel', danger = false, items = [] }) {
+  return new Promise(res => {
+    const d = document.createElement('div');
+    d.setAttribute('data-ui', 'confirm'); d.setAttribute('role', 'alertdialog'); d.setAttribute('aria-modal', 'true');
+    d.className = 'fixed inset-0 z-[70] bg-slate-900/50 flex items-center justify-center p-4 opacity-0 transition-opacity duration-150';
+    const list = items.length ? `<ul class="mt-4 text-sm text-slate-700 bg-slate-50 border rounded-lg divide-y max-h-36 overflow-y-auto">${items.slice(0, 6).map(x => `<li class="px-3 py-1.5 truncate">${esc(x)}</li>`).join('')}${items.length > 6 ? `<li class="px-3 py-1.5 text-slate-500">and ${items.length - 6} more…</li>` : ''}</ul>` : '';
+    d.innerHTML = `<div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 scale-95 transition-transform duration-150"><div class="flex items-start gap-4"><div class="w-10 h-10 rounded-full grid place-items-center shrink-0 ${danger ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-800'}">${ic(danger ? 'M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5' : 'M12 8v5M12 16h.01M12 3a9 9 0 100 18 9 9 0 000-18z')}</div><div class="min-w-0"><h3 class="font-semibold text-slate-900">${esc(title)}</h3><p class="text-sm text-slate-500 mt-1 leading-relaxed">${esc(message)}</p></div></div>${list}<div class="flex justify-end gap-2 mt-6"><button type="button" data-no class="${btn2}">${esc(cancelText)}</button><button type="button" data-yes class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg text-white transition ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-800 hover:bg-emerald-900'}">${esc(confirmText)}</button></div></div>`;
+    const done = v => { removeEventListener('keydown', key, true); d.classList.add('opacity-0'); setTimeout(() => d.remove(), 150); res(v); };
+    const key = e => { if (e.key === 'Escape') { e.stopPropagation(); done(false); } };
+    addEventListener('keydown', key, true);
+    d.onclick = e => { if (e.target === d) done(false); };
+    $('[data-no]', d).onclick = () => done(false); $('[data-yes]', d).onclick = () => done(true);
+    document.body.appendChild(d);
+    requestAnimationFrame(() => { d.classList.remove('opacity-0'); d.firstElementChild.classList.remove('scale-95'); });
+    $('[data-no]', d).focus();
+  });
 }
 
 // ===== plan explorer: search, filters, sort, detail drawer with previous/next =====
@@ -222,6 +242,7 @@ function explorer(m, all, o = {}) {
     $('#pr').innerHTML = !l.length ? '<div class="bg-white border border-dashed rounded-xl p-12 text-center text-sm text-slate-500">No plans match your search. Try clearing a filter.</div>'
       : o.cols ? table(o.cols.heads, l.map(o.cols.row))
       : `<div class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">${l.map((p, i) => planCard(p, i, o.quick ? o.quick(p) : '')).join('')}</div>`;
+    if (o.onPaint) o.onPaint(l);
   };
   $('#pq').oninput = e => { PS.q = e.target.value; paint(); };
   [['pf', 'freq'], ['pb', 'bud'], ['ps', 'sort']].forEach(([id, k]) => $('#' + id).onchange = e => { PS[k] = e.target.value; paint(); });
@@ -250,18 +271,18 @@ window.openPlan = i => {
 };
 
 // ===== app shell: sidebar, top bar with global plan search, keyboard shortcuts =====
-function layout({ brand, nav, views, alias = {}, support = false }) {
+function layout({ brand, nav, views, alias = {}, support = false, badges = null, live = [], onLive = null }) {
   const u = pb.authStore.record, ini = (u.name || u.email || '?').trim()[0].toUpperCase();
   $('#app').innerHTML = `<div class="min-h-screen lg:flex">
   <div id="ov" class="fixed inset-0 bg-slate-900/40 z-30 hidden lg:hidden"></div>
   <aside id="sb" class="fixed lg:sticky top-0 z-40 h-[100dvh] w-60 shrink-0 bg-white border-r flex flex-col -translate-x-full lg:translate-x-0 transition-transform">
     <a href="index.html" class="h-16 px-5 flex items-center gap-3 border-b"><img src="logo.jpeg" alt="" class="w-8 h-8 rounded-md object-cover"><span class="font-semibold text-slate-900 text-[15px]">${brand}</span></a>
-    <nav class="flex-1 p-3 space-y-0.5 overflow-y-auto">${nav.map(n => `<a href="#${n[0]}" data-id="${n[0]}" class="nl flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100">${ic(IC[n[0]] || IC.overview)}${n[1]}</a>`).join('')}</nav>
+    <nav class="flex-1 p-3 space-y-0.5 overflow-y-auto">${nav.map(n => `<a href="#${n[0]}" data-id="${n[0]}" class="nl flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100">${ic(IC[n[0]] || IC.overview)}${n[1]}<span data-b="${n[0]}" class="hidden ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-red-600 text-white text-[11px] font-semibold items-center justify-center"></span></a>`).join('')}</nav>
     <div class="p-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] lg:pb-3 border-t space-y-0.5">${support ? `<a href="${waLink()}" target="_blank" rel="noopener" class="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-100"><span class="text-[#25D366]">${waIcon()}</span>Customer support</a>` : ''}<button onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100">${ic(IC.out)}Log out</button></div>
   </aside>
   <div class="flex-1 min-w-0">
     <header class="sticky top-0 z-20 h-16 bg-white/90 backdrop-blur border-b flex items-center gap-3 px-4 sm:px-8">
-      <button id="mb" class="lg:hidden p-2 -ml-2 text-slate-600" aria-label="Menu">${ic(IC.menu)}</button>
+      <button id="mb" class="relative lg:hidden p-2 -ml-2 text-slate-600" aria-label="Menu">${ic(IC.menu)}<span id="mbd" class="hidden absolute top-1.5 right-1 w-2.5 h-2.5 rounded-full bg-red-600"></span></button>
       <span id="ttl" class="hidden md:block text-sm font-medium text-slate-900 w-44 shrink-0"></span>
       <div class="relative flex-1 max-w-md"><span class="absolute left-3 top-2.5 text-slate-400">${ic(IC.search)}</span><input id="gs" autocomplete="off" placeholder="Jump to a plan…  ( / )" class="${inp} pl-10 bg-slate-50"><div id="gr" class="hidden absolute left-0 right-0 top-11 bg-white border rounded-xl shadow-lg overflow-hidden divide-y"></div></div>
       <div class="ml-auto flex items-center gap-3"><button id="tg" onclick="toggleTheme()" class="p-2 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Switch between light and dark mode" title="Light / dark mode">${ic(document.documentElement.classList.contains('dark') ? IC.sun : IC.moon)}</button><div class="hidden sm:block text-right leading-tight"><p class="text-sm font-medium text-slate-900">${esc(u.name || u.email)}</p><p class="text-xs text-slate-500">${u.role === 'admin' ? 'Administrator' : 'Member'}</p></div><div class="w-9 h-9 rounded-full bg-emerald-800 text-white grid place-items-center text-sm font-semibold">${esc(ini)}</div></div>
@@ -296,14 +317,36 @@ function layout({ brand, nav, views, alias = {}, support = false }) {
   const go = async () => {
     const [rawId, qs = ''] = (location.hash || '#' + nav[0][0]).slice(1).split('?'), v = views[rawId] ? rawId : nav[0][0], navId = alias[v] || v;
     const same = location.hash === window._lh, y = scrollY;                       // refresh() keeps the page where it was
-    if (!same) { window._lh = location.hash; window._hf = {}; }                   // moving to another page forgets its filters
+    if (!same) { window._lh = location.hash; window._hf = {}; window._sel = new Set(); }                   // moving to another page forgets its filters
     document.querySelectorAll('.nl').forEach(a => { const on = a.dataset.id === navId; a.classList.toggle('bg-emerald-50', on); a.classList.toggle('text-emerald-800', on); a.classList.toggle('text-slate-600', !on); });
     $('#ttl').textContent = (nav.find(n => n[0] === navId) || nav[0])[1];
     ALL = null; closePlan(); if (!same) scrollTo(0, 0);
     if (!$('#ov').classList.contains('hidden')) tog();
-    const m = $('#main'); m.innerHTML = '<p class="text-sm text-slate-400">Loading…</p>';
+    const m = $('#main'); if (!same) m.innerHTML = '<p class="text-sm text-slate-400">Loading…</p>';
     try { await views[v](m, new URLSearchParams(qs)); if (same) scrollTo(0, y); } catch (e) { m.innerHTML = `<p class="text-red-600 text-sm">${esc(e.message)}</p>`; }
+    updBadges();
   };
+
+  // red counters beside navigation links (e.g. pending payments) + a dot on the phone menu button + a count in the tab title
+  const updBadges = async () => {
+    if (!badges) return;
+    try {
+      const c = await badges(); let tot = 0;
+      document.querySelectorAll('[data-b]').forEach(el => { const n = c[el.dataset.b] || 0; tot += n; el.textContent = n > 99 ? '99+' : n; el.classList.toggle('hidden', !n); el.classList.toggle('inline-flex', !!n); });
+      $('#mbd').classList.toggle('hidden', !tot);
+      document.title = (tot ? '(' + tot + ') ' : '') + document.title.replace(/^[(]\d+[)]\s*/, '');
+    } catch (e) { /* counters are a convenience; never break the page */ }
+  };
+
+  // real time: PocketBase pushes every change; the page re-renders itself, but never while someone is typing or has a pop-up open
+  let lt, bt;
+  const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|number|tel|email|password|url)$/.test(a.type))); };
+  const busyUI = () => $('[data-ui]') || $('#dr') || typing();
+  const kick = () => { clearTimeout(lt); lt = setTimeout(function run() { if (busyUI()) { lt = setTimeout(run, 2000); return; } refresh(); }, 500); };
+  live.forEach(c => { const p = pb.collection(c).subscribe?.('*', e => { try { onLive?.(c, e); } catch (x) { } clearTimeout(bt); bt = setTimeout(updBadges, 300); kick(); }); p?.catch?.(() => { }); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });   // catch up after the tab slept
+  setInterval(() => { if (!document.hidden) kick(); }, 90000);                              // safety net if a network blocks the live connection
+
   addEventListener('hashchange', go); go();
 }
 
