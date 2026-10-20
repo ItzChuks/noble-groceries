@@ -22,13 +22,15 @@ window.pay = async sid => {
   const st0 = planState(sub, pl, all);
   if (!st0.left) return toast('This plan is already fully paid.', 1);
   modal('Pay for ' + esc(pl.name),
-    '<div id="qh"></div>' + fld('Amount (₦)', 'amount', st0.cost(0), 'number', 'required min="1" step="1"') + '<div id="qv"></div>' + fld('Payment reference / note', 'note', '', 'text', 'placeholder="e.g. transfer ref"'),
+    '<div id="qh"></div>' + fld('Amount (₦)', 'amount', st0.cost(0), 'number', 'required min="1" step="1"') + '<div id="qv"></div><p class="text-xs text-slate-500">You will pay securely on Flutterwave (card, bank transfer or USSD). Your payment is confirmed automatically as soon as it goes through.</p>',
     async d => {
       const st = planState(sub, pl, await pays()), q = quoteFor(st, +d.amount);
       if (!q.ok) { paint(); throw new Error('The amount due has changed (a deadline may have just passed). Please check the new amount.'); }
-      await pb.collection('payments').create({ user: U().id, subscription: sid, amount: q.total, note: d.note, status: 'pending', penalty: q.penalty, installments: q.n, late_count: q.late });
-      toast(`${naira(q.total)} submitted · covers ${plural(q.n, f)}` + (q.next ? ` · next payment due ${fmtDue(f, q.next)}` : ' · plan fully paid'), 0, 8000);
-    }, 'Submit payment');
+      // the server re-checks the amount, records a pending payment and returns a Flutterwave checkout link
+      const r = await pb.send('/api/noble/pay/init', { method: 'POST', body: { subscription: sid, amount: q.total } });
+      if (r.link) { toast('Taking you to Flutterwave…'); location.href = r.link; await new Promise(() => { }); }   // stay on this pop-up until the browser leaves
+      toast(`${naira(q.total)} paid (demo) · covers ${plural(q.n, f)}`, 0, 6000);
+    }, 'Pay with Flutterwave');
   const am = $('input[name="amount"]'), qh = $('#qh'), qv = $('#qv');
   const box = (c, h) => `<div class="rounded-lg border p-3 text-sm ${c}">${h}</div>`;
   const paint = () => {
@@ -49,6 +51,17 @@ window.pay = async sid => {
   const iv = setInterval(() => document.body.contains(am) ? paint() : clearInterval(iv), 15000);   // re-check when a deadline passes
 };
 window.payout = sid => modal('Request payout', fld('Delivery or bank details', 'note', '', 'text', 'required'), d => pb.collection('payouts').create({ user: U().id, subscription: sid, note: d.note, status: 'pending' }).then(() => toast('Payout requested')));
+
+// Coming back from Flutterwave (?status=...&tx_ref=...): ask the server to verify, then tidy the URL.
+// The server asks Flutterwave itself, so editing this URL cannot fake a payment.
+(() => {
+  const sp = new URLSearchParams(location.search), ref = sp.get('tx_ref'); if (!ref) return;
+  history.replaceState(null, '', location.pathname + '#payments');
+  toast('Confirming your payment…', 0, 4000);
+  pb.send('/api/noble/pay/verify', { method: 'POST', body: { tx_ref: ref, cancelled: sp.get('status') === 'cancelled' } })
+    .then(r => toast(r.status === 'confirmed' ? 'Payment confirmed. Thank you!' : r.status === 'rejected' ? 'That payment was not completed.' : 'We have not received confirmation yet. This page updates automatically once it arrives.', r.status === 'rejected', 7000))
+    .catch(x => toast(x.message, 1));
+})();
 
 layout({ brand: "Noble's Groceries", nav: [['overview', 'Overview'], ['plans', 'Browse plans'], ['mine', 'My contributions'], ['payments', 'Transaction history'], ['payouts', 'Payouts'], ['rules', 'Payment rules'], ['profile', 'Profile']], views: {
   async overview(m) {

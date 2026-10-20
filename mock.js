@@ -60,5 +60,18 @@ function createMockPB() {
       aid = u.id; ls.set('pocketbase_auth', JSON.stringify({ token: 'mock', model: { id: u.id, role: u.role } })); return { record: u };
     }
   });
-  return { collection: col, authStore };
+  // demo stand-in for the server's Flutterwave routes: a payment is "paid" and confirmed instantly
+  const send = async (path, o = {}) => {
+    const b = o.body || {};
+    if (path.endsWith('/pay/init')) {
+      const sub = db.subscriptions.find(s => s.id === b.subscription), pl = db.plans.find(p => p.id === sub.plan);
+      const q = quoteFor(planState(sub, pl, db.payments.filter(p => p.subscription === sub.id)), +b.amount);
+      if (!q.ok) throw new Error('Wrong amount.');
+      const r = { id: uid(), created: now(), user: aid, subscription: sub.id, amount: q.total, penalty: q.penalty, installments: q.n, late_count: q.late, note: 'Flutterwave (demo)', status: 'confirmed' };
+      db.payments.push(r); save(); emit('payments', 'create', r); emit('payments', 'update', r);
+      return { demo: true };
+    }
+    return { status: 'confirmed' };
+  };
+  return { collection: col, authStore, send };
 }

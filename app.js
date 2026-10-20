@@ -140,7 +140,7 @@ const rulesHTML = () => {
     + c('Paying ahead', `You can pay more than one instalment at once. On a ${naira(100)} daily plan, paying ${naira(500)} covers 5 days. The form shows how many it covers and when your next payment is due. The amount must be a whole number of instalments.`)
     + c('Your first payment', `Daily: today before noon if you join before noon, otherwise tomorrow before noon. Weekly: the coming Friday noon (or the one after, if it has passed). Monthly: the 2nd of next month.`)
     + c('Admin visibility', `Every payment that includes a penalty is flagged to the admin, with the penalty amount shown.`)
-    + c('Time and confirmation', `All deadlines use Lagos time (WAT), whatever your device clock says. Payments count once the admin confirms them.`) + '</div>';
+    + c('Time and confirmation', `All deadlines use Lagos time (WAT), whatever your device clock says. Payments are made through Flutterwave and are confirmed automatically as soon as the payment goes through.`) + '</div>';
 };
 
 function toast(m, err, ms = 3000) {
@@ -363,7 +363,7 @@ const txFrom = (r, kind) => {
   const pay = kind === 'payment', pl = r.expand?.subscription?.expand?.plan || {};
   return { key: kind + ':' + r.id, kind, id: r.id, created: r.created, at: parseTs(r.created), status: r.status, plan: pl.name || '—', frequency: pl.frequency || '',
     amount: pay ? r.amount : (pl.payout || 0), penalty: pay ? (r.penalty || 0) : 0, late: pay ? (r.late_count || 0) : 0,
-    covers: pay && pl.frequency ? plural(instOf(r, pl), pl.frequency) : '', note: r.note || '', user: r.expand?.user || null };
+    covers: pay && pl.frequency ? plural(instOf(r, pl), pl.frequency) : '', note: r.note || '', ref: r.tx_ref || '', user: r.expand?.user || null };
 };
 const invNo = t => (t.kind === 'payment' ? 'INV' : 'PAYOUT') + '-' + lagosDay(t.created).replace(/-/g, '') + '-' + String(t.id).slice(-5).toUpperCase();
 window.TX = {};

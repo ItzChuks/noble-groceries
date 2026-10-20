@@ -59,3 +59,7 @@ Browser code can be edited by anyone, so the rules that matter are checked on th
 - **Pop-ups instead of browser alerts**: deleting uses an in-page confirmation popup (`confirmBox()` in `app.js`, reusable for anything else).
 - **Delete several plans**: Admin > Plans has a checkbox on every plan and a *Select all* box (it selects the plans currently shown by the search/filters). A bar appears at the bottom with *Delete selected*. A plan that members have joined cannot be deleted (PocketBase protects it); it is skipped and reported, so hide it instead.
 - **Demo mode** (`USE_MOCK = true`) emulates real time too, for actions in the same tab.
+
+## Flutterwave payments
+
+"Make payment" now opens Flutterwave's secure checkout and the payment is confirmed automatically (no admin step). No keys live in the website: they are set on the backend (see the backend README, section "Flutterwave payments"). In demo mode (`USE_MOCK = true`) payments are confirmed instantly. Admins no longer confirm Flutterwave payments; Confirm/Reject only appears on a payment flagged `REVIEW` (amount mismatch).
