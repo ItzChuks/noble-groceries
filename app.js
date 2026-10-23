@@ -3,7 +3,7 @@ const PB_URL = 'https://noble-backend-production-16f3.up.railway.app';
 const USE_MOCK = false; // false = real PocketBase (default). true = offline demo using localStorage + mock.js.
 const pb = USE_MOCK ? createMockPB() : new PocketBase(PB_URL);
 pb.autoCancellation?.(false);
-const SUPPORT_PHONE = '08037795455';                      // customer-support number (also used on invoices)
+const SUPPORT_PHONE = '08026701578';                      // customer-support number (also used on invoices)
 // Fees (naira). Display only: the amounts that are actually charged are set on the server (pb_hooks/fees.js, keep them in sync).
 const FEES = { shirt: 5000, join: 3000, clearance: 3000 };
 const SUPPORT_WHATSAPP = '234' + SUPPORT_PHONE.slice(1);  // same number in international form for WhatsApp // the pages fire several identical requests in parallel; don't let the SDK cancel them

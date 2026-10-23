@@ -15,7 +15,7 @@ function createMockPB() {
   const add = (c, o, age = 0) => { const r = { id: uid(), created: now(age), ...o }; db[c].push(r); return r; };
   if (!db) {
     db = { users: [], plans: [], subscriptions: [], payments: [], payouts: [], fees: [] };
-    add('users', { email: 'admin@noble.com', password: 'admin12345', name: 'Noble Admin', country: 'Nigeria', phone: '08037795455', role: 'admin', shirt_paid: true }, 60);
+    add('users', { email: 'admin@noble.com', password: 'admin12345', name: 'Noble Admin', country: 'Nigeria', phone: '08026701578', role: 'admin', shirt_paid: true }, 60);
     const u = add('users', { email: 'user@noble.com', password: 'user12345', name: 'Ada Okafor', country: 'Nigeria', phone: '08012345678', role: 'user', shirt_paid: true }, 40);
     add('users', { email: 'chidi@example.com', password: 'pass12345', name: 'Chidi Eze', country: 'Ghana', phone: '0244000111', role: 'user', shirt_paid: false }, 15);
     const n = a => '₦' + a.toLocaleString();
