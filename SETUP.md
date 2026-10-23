@@ -1,4 +1,4 @@
-# Noble's Groceries – PocketBase setup
+# Nobles Groceries – PocketBase setup
 
 Tested with PocketBase **v0.40.5** and the JS SDK **0.26.8** (loaded from a CDN in each page).
 Needs PocketBase v0.23 or newer.
@@ -63,3 +63,13 @@ Browser code can be edited by anyone, so the rules that matter are checked on th
 ## Flutterwave payments
 
 "Make payment" now opens Flutterwave's secure checkout and the payment is confirmed automatically (no admin step). No keys live in the website: they are set on the backend (see the backend README, section "Flutterwave payments"). In demo mode (`USE_MOCK = true`) payments are confirmed instantly. Admins no longer confirm Flutterwave payments; Confirm/Reject only appears on a payment flagged `REVIEW` (amount mismatch).
+
+## Fees, registration and terms
+
+- **T-shirt registration (₦5,000, one time, compulsory)**: until it is paid a member only sees a "Complete your registration" page. Admin > Users shows *Registered* and *Unregistered* members (with filter tabs) and can mark someone registered or unregistered by hand (for example after an offline payment).
+- **Joining fee (₦3,000)**: paid each time a member joins a plan; the plan is joined automatically once Flutterwave confirms it.
+- **Payout clearance fee (₦3,000)**: paid with every payout request; the request is sent automatically once confirmed.
+- All fees appear under Admin > Fees and, for members, under *Fees paid*. Amounts: `FEES` at the top of `app.js` (display) and `pb_hooks/fees.js` on the backend (charged). Keep both in sync.
+- **Terms and Conditions**: `terms.html` (text lives in `termsHTML()` in `app.js`). Sign-up requires ticking the acceptance box; the server rejects sign-ups without it and stores `terms_accepted_at`.
+- **Foodie** is a third plan category next to cash and grocery (Admin > Plans > Add plan).
+- **Number of payments**: Admin > Plans > Add/Edit plan has a *Number of weeks* (days / months) field. It follows the saving period until you pick or type your own, for example 12 or 13 weeks, or 50 or 52 weeks. Members pay for exactly that number.

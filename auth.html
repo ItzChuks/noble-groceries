@@ -1,7 +1,7 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com/3.4.17"></script><script src="https://cdn.jsdelivr.net/npm/pocketbase@0.26.8/dist/pocketbase.umd.js"></script><script src="mock.js"></script><script src="app.js"></script><link rel="icon" href="logo.jpeg"><title>Account – Noble's Groceries</title></head>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://cdn.tailwindcss.com/3.4.17"></script><script src="https://cdn.jsdelivr.net/npm/pocketbase@0.26.8/dist/pocketbase.umd.js"></script><script src="mock.js"></script><script src="app.js"></script><link rel="icon" href="logo.jpeg"><title>Account – Nobles Groceries</title></head>
 <body class="bg-emerald-950 min-h-screen flex items-center justify-center px-4 py-8" style="background-image:radial-gradient(60rem 30rem at 50% -10%,rgba(16,185,129,.18),transparent)">
 <div class="w-full max-w-md">
-  <a href="index.html" class="flex flex-col items-center gap-3 font-semibold text-white text-xl mb-6"><img src="logo.jpeg" alt="Noble's Groceries logo" class="w-16 h-16 rounded-xl shadow-lg">Noble's Groceries</a>
+  <a href="index.html" class="flex flex-col items-center gap-3 font-semibold text-white text-xl mb-6"><img src="logo.jpeg" alt="Nobles Groceries logo" class="w-16 h-16 rounded-xl shadow-lg">Nobles Groceries</a>
   <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8">
     <div class="grid grid-cols-2 bg-slate-100 rounded-lg p-1 mb-6 text-sm font-medium"><button type="button" id="t-login" class="py-2 rounded-md">Log in</button><button type="button" id="t-register" class="py-2 rounded-md">Sign up</button></div>
     <h1 id="ttl" class="text-xl font-semibold text-slate-900"></h1>
@@ -267,8 +267,8 @@ function draw(){
  ['login','register'].forEach(m=>$('#t-'+m).className='py-2 rounded-md transition '+(m===mode?'bg-white shadow text-slate-900':'text-slate-500 hover:text-slate-700'));
  const reg=mode==='register';
  $('#ttl').textContent=reg?'Create your account':'Welcome back';
- $('#sub').textContent=reg?'Join Noble\u2019s Groceries and start saving today.':'Log in to manage your savings plans.';
- $('#alt').innerHTML=reg?'Already have an account? <button type="button" id="sw" class="text-emerald-800 font-medium hover:underline">Log in</button>':'New to Noble\u2019s Groceries? <button type="button" id="sw" class="text-emerald-800 font-medium hover:underline">Create an account</button>';
+ $('#sub').textContent=reg?'Join Nobles Groceries and start saving today.':'Log in to manage your savings plans.';
+ $('#alt').innerHTML=reg?'Already have an account? <button type="button" id="sw" class="text-emerald-800 font-medium hover:underline">Log in</button>':'New to Nobles Groceries? <button type="button" id="sw" class="text-emerald-800 font-medium hover:underline">Create an account</button>';
  $('#sw').onclick=()=>{mode=reg?'login':'register';draw()};
  $('#f').innerHTML=(reg?
    field('Full name','name','text','name','required placeholder="e.g. Ada Okafor"')
@@ -288,6 +288,8 @@ function draw(){
  +field('Email address','email','email',reg?'email':'username','required placeholder="you@example.com"')
  +pwField('Password',reg?'password':'password',reg?'new-password':'current-password',reg?'At least 8 characters.':'')
  +(reg?pwField('Confirm password','passwordConfirm','new-password'):'')
+ +(reg?`<div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><p class="text-sm font-semibold">Before you join</p><ul class="list-disc pl-4 mt-1 space-y-0.5"><li>One-time t-shirt registration fee: <b>${naira(FEES.shirt)}</b>. It is compulsory: until it is paid you cannot do anything else on the site.</li><li>Joining fee: <b>${naira(FEES.join)}</b>, paid before you join any plan.</li><li>Payout clearance fee: <b>${naira(FEES.clearance)}</b>, paid with every payout request.</li></ul></div>
+  <label class="flex items-start gap-2 text-sm text-slate-700 cursor-pointer"><input id="terms" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0 accent-emerald-700"><span>I have read and accept the <a href="terms.html" target="_blank" class="text-emerald-800 underline">Terms and Conditions</a>, including these fees.</span></label>`:'')
  +`<button id="go" class="${btn} w-full py-2.5 mt-1">${reg?'Create account':'Log in'}</button>`;
  hideErr();
  document.querySelectorAll('[data-eye]').forEach(b=>b.onclick=()=>{const i=$('#'+b.dataset.eye),show=i.type==='password';i.type=show?'text':'password';b.innerHTML=svg(show?EYE_OFF:EYE);b.setAttribute('aria-label',show?'Hide password':'Show password')});
@@ -345,8 +347,9 @@ $('#f').onsubmit=async e=>{
    if(digits.length<6||digits.length>12)throw new Error('Enter a valid phone number.');
    if(d.password.length<8)throw new Error('Password must be at least 8 characters.');
    if(d.password!==d.passwordConfirm)throw new Error('Passwords do not match.');
+   if(!$('#terms').checked)throw new Error('Please accept the Terms and Conditions to create your account.');
    busy(true);
-   await pb.collection('users').create({name:d.name.trim(),email,password:d.password,passwordConfirm:d.passwordConfirm,country:sel.n,phone:'+'+sel.d+digits,emailVisibility:true});
+   await pb.collection('users').create({name:d.name.trim(),email,password:d.password,passwordConfirm:d.passwordConfirm,country:sel.n,phone:'+'+sel.d+digits,emailVisibility:true,terms_accepted:true});
   }
   busy(true);
   await pb.collection('users').authWithPassword(email,d.password);

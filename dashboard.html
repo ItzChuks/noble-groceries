@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><script src="https://cdn.tailwindcss.com/3.4.17"></script><script src="https://cdn.jsdelivr.net/npm/pocketbase@0.26.8/dist/pocketbase.umd.js"></script><script src="mock.js"></script><script src="pdf.js"></script><script src="app.js"></script><link rel="icon" href="logo.jpeg"><title>Dashboard – Noble's Groceries</title></head>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><script src="https://cdn.tailwindcss.com/3.4.17"></script><script src="https://cdn.jsdelivr.net/npm/pocketbase@0.26.8/dist/pocketbase.umd.js"></script><script src="mock.js"></script><script src="pdf.js"></script><script src="app.js"></script><link rel="icon" href="logo.jpeg"><title>Dashboard – Nobles Groceries</title></head>
 <body class="bg-slate-50 text-slate-800"><div id="app"></div>
 <script>
 if (guard()) {
@@ -14,7 +14,18 @@ const dueLine = (st, f) => !st.left ? '<span class="text-emerald-800 font-medium
   : `Next payment due <b class="font-medium text-slate-700">${fmtDue(f, st.next)}</b>`;
 
 window.PLAN_ACTION = p => `<button onclick="closePlan();join('${p.id}')" class="${btn} w-full py-2.5">Join this plan</button>`;
-window.join = async id => { try { await pb.collection('subscriptions').create({ user: U().id, plan: id, status: 'active' }); toast('Plan joined'); location.hash = 'mine'; } catch (e) { toast(e.message, 1); } };
+// Joining a plan: the ₦3,000 joining fee is paid first; the server then joins the plan automatically once Flutterwave confirms it.
+window.join = async id => {
+  const pl = (window._pl || []).find(p => p.id === id) || await pb.collection('plans').getOne(id).catch(() => null);
+  if (!pl) return toast('That plan could not be found.', 1);
+  const row = (k, v) => `<div class="flex justify-between gap-4 py-2 text-sm"><dt class="text-slate-500">${k}</dt><dd class="font-medium text-slate-900 text-right">${v}</dd></div>`;
+  modal('Join ' + esc(pl.name),
+    `<dl class="divide-y border rounded-lg px-3">${row('Contribution', naira(pl.amount) + ' / ' + FQ[pl.frequency])}${row('Number of payments', pl.duration + ' ' + FQ[pl.frequency] + (pl.duration === 1 ? '' : 's'))}${row('Total payout', naira(pl.payout))}</dl>`
+    + `<div class="rounded-lg border bg-amber-50 border-amber-200 text-amber-800 p-3 text-sm">A joining fee of <b>${naira(FEES.join)}</b> is paid before you join any plan. You join as soon as the payment is confirmed.</div>`
+    + '<p class="text-xs text-slate-500">You will pay securely on Flutterwave. By joining you agree to the <a href="terms.html" target="_blank" class="text-emerald-800 underline">Terms and Conditions</a>.</p>',
+    async () => { await payFee({ type: 'join', plan: id }); toast('Plan joined (demo)'); location.hash = 'mine'; },
+    'Pay ' + naira(FEES.join) + ' and join');
+};
 
 // Payment form: enforces the lateness penalty, accepts advance payments, shows what the amount covers and the next due date
 window.pay = async sid => {
@@ -50,20 +61,34 @@ window.pay = async sid => {
   am.oninput = paint; paint();
   const iv = setInterval(() => document.body.contains(am) ? paint() : clearInterval(iv), 15000);   // re-check when a deadline passes
 };
-window.payout = sid => modal('Request payout', fld('Delivery or bank details', 'note', '', 'text', 'required'), d => pb.collection('payouts').create({ user: U().id, subscription: sid, note: d.note, status: 'pending' }).then(() => toast('Payout requested')));
+// Requesting a payout: the ₦3,000 clearance fee is paid first; the server sends the request once Flutterwave confirms it.
+window.payout = sid => modal('Request payout',
+  `<div class="rounded-lg border bg-amber-50 border-amber-200 text-amber-800 p-3 text-sm">A clearance fee of <b>${naira(FEES.clearance)}</b> is paid with every payout request. Your request is sent to the admin as soon as the fee is confirmed.</div>` + fld('Delivery or bank details', 'note', '', 'text', 'required'),
+  async d => { await payFee({ type: 'clearance', subscription: sid, details: d.note }); toast('Payout requested (demo)'); },
+  'Pay ' + naira(FEES.clearance) + ' and request payout');
 
-// Coming back from Flutterwave (?status=...&tx_ref=...): ask the server to verify, then tidy the URL.
-// The server asks Flutterwave itself, so editing this URL cannot fake a payment.
-(() => {
-  const sp = new URLSearchParams(location.search), ref = sp.get('tx_ref'); if (!ref) return;
-  history.replaceState(null, '', location.pathname + '#payments');
-  toast('Confirming your payment…', 0, 4000);
-  pb.send('/api/noble/pay/verify', { method: 'POST', body: { tx_ref: ref, cancelled: sp.get('status') === 'cancelled' } })
-    .then(r => toast(r.status === 'confirmed' ? 'Payment confirmed. Thank you!' : r.status === 'rejected' ? 'That payment was not completed.' : 'We have not received confirmation yet. This page updates automatically once it arrives.', r.status === 'rejected', 7000))
-    .catch(x => toast(x.message, 1));
-})();
+// The t-shirt fee comes first: until it is paid the member only sees this page (the server enforces it as well).
+const needShirt = () => U().role !== 'admin' && !U().shirt_paid;
+function gate() {
+  const u = U();
+  $('#app').innerHTML = `<div class="min-h-screen grid place-items-center p-4 bg-slate-50"><div class="w-full max-w-lg bg-white border rounded-2xl p-6 sm:p-8 shadow-sm">
+    <div class="flex items-center gap-3"><img src="logo.jpeg" alt="" class="w-10 h-10 rounded-lg object-cover"><span class="font-semibold text-slate-900">Nobles Groceries</span></div>
+    <h1 class="text-xl font-semibold text-slate-900 mt-6">Complete your registration</h1>
+    <p class="text-sm text-slate-600 mt-2 leading-relaxed">Welcome${u.name ? ', ' + esc(u.name.split(' ')[0]) : ''}. Every member pays a one-time <b>${naira(FEES.shirt)}</b> for the Nobles Groceries t-shirt. Until it is paid you are an unregistered member and cannot join a plan, make a payment or request a payout.</p>
+    <button id="gp" class="${btn} w-full py-2.5 mt-5">Pay ${naira(FEES.shirt)} with Flutterwave</button>
+    <p class="text-xs text-slate-500 mt-2">You pay securely on Flutterwave. Your account is registered automatically as soon as the payment is confirmed.</p>
+    <details class="mt-6 text-sm"><summary class="cursor-pointer font-medium text-slate-700">Other fees you should know about</summary><p class="mt-2 text-slate-600 leading-relaxed">A joining fee of <b>${naira(FEES.join)}</b> is paid each time you join a plan, and a clearance fee of <b>${naira(FEES.clearance)}</b> is paid with every payout request. <a href="terms.html" target="_blank" class="text-emerald-800 underline">Read the full terms</a>.</p></details>
+    <div class="flex items-center justify-between mt-6 pt-4 border-t text-sm"><a href="${waLink()}" target="_blank" rel="noopener" class="text-slate-600 hover:text-slate-900">Customer support</a><button onclick="logout()" class="text-slate-600 hover:text-slate-900">Log out</button></div></div></div>`;
+  $('#gp').onclick = async () => {
+    const b = $('#gp'), t = b.textContent; b.disabled = true; b.textContent = 'Please wait…';
+    try { await payFee({ type: 'shirt' }); toast('T-shirt fee paid (demo). You are now registered.'); setTimeout(() => location.reload(), 800); }
+    catch (x) { toast(x.message, 1); b.disabled = false; b.textContent = t; }
+  };
+  // the payment may be confirmed by Flutterwave's webhook while this page is open
+  setInterval(async () => { try { await pb.collection('users').authRefresh(); if (U().shirt_paid) location.reload(); } catch (x) { } }, 6000);
+}
 
-layout({ brand: "Noble's Groceries", nav: [['overview', 'Overview'], ['plans', 'Browse plans'], ['mine', 'My contributions'], ['payments', 'Transaction history'], ['payouts', 'Payouts'], ['rules', 'Payment rules'], ['profile', 'Profile']], views: {
+const startApp = () => layout({ brand: "Nobles Groceries", nav: [['overview', 'Overview'], ['plans', 'Browse plans'], ['mine', 'My contributions'], ['payments', 'Transaction history'], ['fees', 'Fees paid'], ['payouts', 'Payouts'], ['rules', 'Rules and fees'], ['profile', 'Profile']], views: {
   async overview(m) {
     const [s, p] = await Promise.all([subs(), pays()]), act = s.filter(x => x.status === 'active');
     m.innerHTML = head('Welcome back, ' + esc((U().name || 'there').split(' ')[0]), 'A summary of your savings activity.', `<a href="#plans" class="${btn}">Browse plans</a>`)
@@ -73,7 +98,7 @@ layout({ brand: "Noble's Groceries", nav: [['overview', 'Overview'], ['plans', '
   },
   async plans(m) {
     const l = await pb.collection('plans').getFullList({ filter: 'active=true' });
-    m.innerHTML = head('Browse plans', 'Search, filter and compare every plan, then join in one click.') + '<div id="ex"></div>';
+    m.innerHTML = head('Browse plans', 'Search, filter and compare every plan, then join. A ' + naira(FEES.join) + ' joining fee applies each time you join a plan.') + '<div id="ex"></div>';
     explorer($('#ex'), l, { quick: p => `<button onclick="join('${p.id}')" class="${btn} flex-1">Join plan</button>` });
   },
   async mine(m) {
@@ -95,16 +120,39 @@ layout({ brand: "Noble's Groceries", nav: [['overview', 'Overview'], ['plans', '
     m.innerHTML = head('Transaction history', 'Every payment and payout. Filter by date and download invoices as PDF.') + '<div id="th"></div>';
     txHistory($('#th'), { key: 'me', cust: U(), txs: [...p.map(x => txFrom(x, 'payment')), ...o.map(x => txFrom(x, 'payout'))].sort((a, b) => b.at - a.at) });
   },
+  async fees(m) {
+    const l = await pb.collection('fees').getFullList({ filter: uf(), expand: 'plan', sort: '-created' });
+    m.innerHTML = head('Fees paid', 'Your t-shirt registration, joining and payout clearance fees.') + table(['Date', 'Fee', 'Plan', 'Amount', 'Status'], l.map(x => [date(x.created), FEE_LABEL[x.type] || x.type, esc(x.expand?.plan?.name || '—'), naira(x.amount), badge(x.status)]));
+  },
   async payouts(m) { const l = await pb.collection('payouts').getFullList({ filter: uf(), expand: 'subscription.plan', sort: '-created' }); m.innerHTML = head('Payouts', 'Your payout requests.') + table(['Date', 'Plan', 'Details', 'Status'], l.map(x => [date(x.created), esc(planOf(x.expand?.subscription || {}).name), esc(x.note), badge(x.status)])); },
-  async rules(m) { m.innerHTML = head('Payment rules', 'How due dates, late penalties and advance payments work.') + rulesHTML(); },
+  async rules(m) { m.innerHTML = head('Rules and fees', 'Fees, due dates, late penalties and advance payments. These are part of the <a href="terms.html" target="_blank" class="text-emerald-800 underline">Terms and Conditions</a>.') + rulesHTML(); },
   async profile(m) {
     const u = U(); m.innerHTML = head('Profile', 'Update your details.') + `<form id="pf2" class="bg-white border rounded-xl p-6 max-w-md space-y-3">${fld('Full name', 'name', u.name)}${fld('Country', 'country', u.country)}${fld('Phone', 'phone', u.phone)}<button class="${btn}">Save changes</button></form>`;
     $('#pf2').onsubmit = async e => { e.preventDefault(); try { await pb.collection('users').update(u.id, Object.fromEntries(new FormData(e.target))); toast('Saved'); } catch (x) { toast(x.message, 1); } };
   }
-}, support: true, live: ['plans', 'subscriptions', 'payments', 'payouts'], onLive: (c, e) => {
+}, support: true, live: ['plans', 'subscriptions', 'payments', 'payouts', 'fees'], onLive: (c, e) => {
   if (e.action !== 'update' || e.record.status === 'pending') return;
   if (c === 'payments') toast('Your payment of ' + naira(e.record.amount) + ' was ' + e.record.status + '.', e.record.status === 'rejected');
+  if (c === 'fees') toast('Your ' + (FEE_LABEL[e.record.type] || 'fee').toLowerCase() + ' payment of ' + naira(e.record.amount) + ' was ' + e.record.status + '.', e.record.status === 'rejected');
   if (c === 'payouts') toast('Your payout request was ' + (e.record.status === 'confirmed' ? 'approved' : e.record.status) + '.', e.record.status === 'rejected');
 } });
+
+// Coming back from Flutterwave (?status=...&tx_ref=...): ask the server to verify, then tidy the URL.
+// The server asks Flutterwave itself, so editing this URL cannot fake a payment.
+(async () => {
+  const sp = new URLSearchParams(location.search), ref = sp.get('tx_ref');
+  if (ref) {
+    history.replaceState(null, '', location.pathname + '#payments');
+    toast('Confirming your payment…', 0, 4000);
+    try {
+      const r = await pb.send('/api/noble/pay/verify', { method: 'POST', body: { tx_ref: ref, cancelled: sp.get('status') === 'cancelled' } });
+      const done = { payment: 'Payment confirmed. Thank you!', shirt: 'Payment confirmed. You are now a registered member!', join: 'Payment confirmed. You have joined the plan!', clearance: 'Clearance fee confirmed. Your payout request has been sent.' };
+      toast(r.status === 'confirmed' ? (done[r.type] || done.payment) : r.status === 'rejected' ? 'That payment was not completed.' : 'We have not received confirmation yet. This page updates automatically once it arrives.', r.status === 'rejected', 7000);
+      if (r.status === 'confirmed') history.replaceState(null, '', location.pathname + '#' + ({ join: 'mine', clearance: 'payouts', shirt: 'overview' }[r.type] || 'payments'));
+    } catch (x) { toast(x.message, 1); }
+  }
+  try { await pb.collection('users').authRefresh(); } catch (x) { }   // picks up a freshly confirmed registration
+  needShirt() ? gate() : startApp();
+})();
 }
 </script></body></html>

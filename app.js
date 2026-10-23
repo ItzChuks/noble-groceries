@@ -4,6 +4,8 @@ const USE_MOCK = false; // false = real PocketBase (default). true = offline dem
 const pb = USE_MOCK ? createMockPB() : new PocketBase(PB_URL);
 pb.autoCancellation?.(false);
 const SUPPORT_PHONE = '08037795455';                      // customer-support number (also used on invoices)
+// Fees (naira). Display only: the amounts that are actually charged are set on the server (pb_hooks/fees.js, keep them in sync).
+const FEES = { shirt: 5000, join: 3000, clearance: 3000 };
 const SUPPORT_WHATSAPP = '234' + SUPPORT_PHONE.slice(1);  // same number in international form for WhatsApp // the pages fire several identical requests in parallel; don't let the SDK cancel them
 
 document.head.insertAdjacentHTML('beforeend', '<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet"><style>body{font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}</style>');
@@ -18,6 +20,7 @@ const inp = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-s
 const btn = 'inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-emerald-800 text-white hover:bg-emerald-900 transition';
 const btn2 = 'inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition';
 const refresh = () => dispatchEvent(new Event('hashchange'));
+const FEE_LABEL = { shirt: 'T-shirt registration', join: 'Joining fee', clearance: 'Payout clearance fee' };
 const FQ = { daily: 'day', weekly: 'week', monthly: 'month' };
 // A plan's saving period is set in months; the number of payments follows from the frequency (daily ~30.4/month, weekly ~4.35/month, monthly 1/month)
 const paymentsFor = (months, f) => f === 'daily' ? Math.round(months * 365 / 12) : f === 'weekly' ? Math.round(months * 52.14 / 12) : months;
@@ -28,10 +31,10 @@ const WA_PATH = 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.
 const waIcon = (cls = 'w-[18px] h-[18px]') => `<svg class="${cls} shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${WA_PATH}"/></svg>`;
 const waLink = () => {
   const u = pb.authStore.record;
-  const t = "Hello Noble's Groceries support, I need some help." + (u ? '\nName: ' + (u.name || '') + '\nEmail: ' + (u.email || '') : '');
+  const t = "Hello Nobles Groceries support, I need some help." + (u ? '\nName: ' + (u.name || '') + '\nEmail: ' + (u.email || '') : '');
   return 'https://wa.me/' + SUPPORT_WHATSAPP + '?text=' + encodeURIComponent(t);
 };
-const IC = { overview: 'M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-3H4z', plans: 'M4 6h16M4 12h16M4 18h10', mine: 'M4 20V10M10 20V4M16 20v-7M22 20H2', payments: 'M3 6h18v12H3zM3 10h18', payouts: 'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14', profile: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0', users: 'M16 20v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM21 20v-1a4 4 0 00-3-3.9', subs: 'M9 12l2 2 4-4M5 4h14v16H5z', out: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h9', menu: 'M4 6h16M4 12h16M4 18h16', moon: 'M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z', sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4', rules: 'M9 12h6M9 16h6M7 3h8l4 4v14H7zM15 3v4h4', search: 'M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z' };
+const IC = { overview: 'M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-3H4z', plans: 'M4 6h16M4 12h16M4 18h10', mine: 'M4 20V10M10 20V4M16 20v-7M22 20H2', payments: 'M3 6h18v12H3zM3 10h18', fees: 'M3 6h18v12H3zM3 10h18', payouts: 'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14', profile: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0', users: 'M16 20v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM21 20v-1a4 4 0 00-3-3.9', subs: 'M9 12l2 2 4-4M5 4h14v16H5z', out: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h9', menu: 'M4 6h16M4 12h16M4 18h16', moon: 'M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z', sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4', rules: 'M9 12h6M9 16h6M7 3h8l4 4v14H7zM15 3v4h4', search: 'M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z' };
 
 // ===== theme (light / dark) =====
 const THEME_KEY = 'noble_theme';
@@ -130,9 +133,32 @@ function quoteFor(st, amount) {
 
 const penBadge = p => p.penalty > 0 ? `<span class="inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ring-inset bg-amber-50 text-amber-800 ring-amber-200">Late · +${naira(p.penalty)}</span>` : '<span class="text-slate-400">—</span>';
 const covers = p => { const pl = p.expand?.subscription?.expand?.plan || {}; return pl.frequency ? plural(instOf(p, pl), pl.frequency) : '—'; };
+// The fees and registration rules, shown on the landing page, sign-up page, rules pages and the terms page.
+const feeRulesHTML = () => {
+  const c = (t, d) => `<div class="bg-white border rounded-xl p-5"><h3 class="font-semibold text-slate-900 text-sm">${t}</h3><p class="text-sm text-slate-600 mt-1.5 leading-relaxed">${d}</p></div>`;
+  return '<div class="grid md:grid-cols-2 gap-4 max-w-4xl">'
+    + c(`T-shirt registration · ${naira(FEES.shirt)}`, `A compulsory <b>one-time</b> payment for your Nobles Groceries t-shirt. Until it is paid you are an <b>unregistered</b> member and cannot join a plan, make a payment or request a payout. Once it is confirmed you become a <b>registered</b> member.`)
+    + c(`Joining fee · ${naira(FEES.join)}`, `Before you can join any plan you pay a ${naira(FEES.join)} joining fee. It is paid each time you join a plan, separately from your contributions, and you join the plan as soon as the payment is confirmed.`)
+    + c(`Payout clearance fee · ${naira(FEES.clearance)}`, `Every payout request carries a ${naira(FEES.clearance)} clearance fee. Your request is sent to the admin as soon as the fee is confirmed.`)
+    + c('Plan length', `Each plan shows its exact number of payments (for example 12 or 13 weeks, or 50 or 52 weeks). You pay for exactly the number of payments shown on the plan you join.`)
+    + '</div>';
+};
+const termsHTML = () => {
+  const m = RULES.lateMultiplier, S = (n, t, body) => `<section class="bg-white border rounded-xl p-5 sm:p-6"><h2 class="font-semibold text-slate-900">${n}. ${t}</h2><div class="text-sm text-slate-600 mt-2 leading-relaxed space-y-2">${body}</div></section>`;
+  return '<div class="space-y-4">'
+    + S(1, 'About these terms', `<p>Nobles Groceries is a budget and isusu savings platform where members contribute daily, weekly or monthly towards a cash or goods payout. By creating an account you confirm that you have read, understood and accepted these Terms and Conditions, including every fee listed below.</p>`)
+    + S(2, 'Registration and the t-shirt fee', `<p>Every member must make a compulsory one-time payment of <b>${naira(FEES.shirt)}</b> for the Nobles Groceries t-shirt.</p><p>Until this payment is confirmed your account is <b>unregistered</b>: you cannot join a plan, make a contribution or request a payout. When the payment is confirmed your account becomes <b>registered</b>. The fee is paid once only.</p>`)
+    + S(3, 'Joining fee', `<p>Before you can join any plan you must pay a joining fee of <b>${naira(FEES.join)}</b>. It is paid each time you join a plan. It is separate from your contributions and you join the plan once the payment is confirmed.</p>`)
+    + S(4, 'Plans', `<p>We offer three kinds of plan: <b>Cash</b>, <b>Groceries</b> and <b>Foodie</b>. Every plan shows its contribution amount, how often you pay, its saving period, the number of payments and the payout. The number of payments can differ between plans (for example 12 or 13 weeks, or 50 or 52 weeks) and you pay for exactly the number of payments shown on the plan you join.</p>`)
+    + S(5, 'Contributions, deadlines and late penalties', `<p>All deadlines use Lagos time (WAT). Daily plans are due before <b>${RULES.cutoffHour}:00 noon</b> each day. Weekly plans are due by <b>Friday ${RULES.cutoffHour}:00 noon</b>. Monthly plans are due by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>.</p><p>A late payment costs double (for example ${naira(100)} becomes ${naira(100 * m)}). The extra amount is a penalty: it does not count towards your savings or payout. You may pay several instalments in advance.</p>`)
+    + S(6, 'Payouts and the clearance fee', `<p>You can request a payout only when your plan is fully paid and its saving period has ended. Every payout request carries a clearance fee of <b>${naira(FEES.clearance)}</b>. Your request is sent as soon as the clearance fee is confirmed.</p>`)
+    + S(7, 'Payments', `<p>Payments are made securely through Flutterwave and are confirmed automatically once they go through. You can see every payment, fee and payout on your dashboard.</p>`)
+    + S(8, 'Questions', `<p>For any question about these terms, contact customer support on <b>${SUPPORT_PHONE}</b>.</p>`)
+    + '</div>';
+};
 const rulesHTML = () => {
   const m = RULES.lateMultiplier, c = (t, d) => `<div class="bg-white border rounded-xl p-5"><h3 class="font-semibold text-slate-900 text-sm">${t}</h3><p class="text-sm text-slate-600 mt-1.5 leading-relaxed">${d}</p></div>`;
-  return '<div class="grid md:grid-cols-2 gap-4 max-w-4xl">'
+  return '<h2 class="text-sm font-semibold text-slate-900 mb-3">Fees and registration</h2>' + feeRulesHTML() + '<h2 class="text-sm font-semibold text-slate-900 mt-8 mb-3">Payments and deadlines</h2><div class="grid md:grid-cols-2 gap-4 max-w-4xl">'
     + c('Daily plans', `Pay before <b>${RULES.cutoffHour}:00 noon</b> each day. After noon the payment is doubled: ${naira(100)} becomes ${naira(100 * m)}.`)
     + c('Weekly plans', `Pay any time from Monday up to <b>Friday ${RULES.cutoffHour}:00 noon</b>. After that the week's payment is doubled.`)
     + c('Monthly plans', `Each month's payment is due by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>. After that it is doubled.`)
@@ -142,6 +168,14 @@ const rulesHTML = () => {
     + c('Admin visibility', `Every payment that includes a penalty is flagged to the admin, with the penalty amount shown.`)
     + c('Time and confirmation', `All deadlines use Lagos time (WAT), whatever your device clock says. Payments are made through Flutterwave and are confirmed automatically as soon as the payment goes through.`) + '</div>';
 };
+
+// Pays a fee through Flutterwave: the server decides the amount, we just say which fee (see pb_hooks/flutterwave.pb.js).
+// body: { type: 'shirt' } | { type: 'join', plan } | { type: 'clearance', subscription, details }
+async function payFee(body) {
+  const r = await pb.send('/api/noble/fee/init', { method: 'POST', body });
+  if (r.link) { toast('Taking you to Flutterwave…'); location.href = r.link; await new Promise(() => { }); }   // stay put until the browser leaves
+  return r;
+}
 
 function toast(m, err, ms = 3000) {
   const t = document.createElement('div');
@@ -232,7 +266,7 @@ function explorer(m, all, o = {}) {
       <select id="pf" class="${inp} sm:!w-auto">${opts({ all: 'All frequencies', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' }, PS.freq)}</select>
       <select id="pb" class="${inp} sm:!w-auto">${opts(BUD, PS.bud)}</select>
       <select id="ps" class="${inp} col-span-2 sm:col-auto sm:!w-auto">${opts(SORT, PS.sort)}</select></div>
-    <div class="flex items-center justify-between gap-3"><div id="pt" class="flex gap-1.5 overflow-x-auto min-w-0">${[['all', 'All plans', all.length], ['grocery', 'Grocery', n('grocery')], ['cash', 'Cash savings', n('cash')]].map(c => `<button data-c="${c[0]}" class="whitespace-nowrap px-3 py-1.5 rounded-full text-sm font-medium border">${c[1]} <span class="opacity-60">${c[2]}</span></button>`).join('')}</div>
+    <div class="flex items-center justify-between gap-3"><div id="pt" class="flex gap-1.5 overflow-x-auto min-w-0">${[['all', 'All plans', all.length], ['grocery', 'Grocery', n('grocery')], ['cash', 'Cash savings', n('cash')], ['foodie', 'Foodie', n('foodie')]].map(c => `<button data-c="${c[0]}" class="whitespace-nowrap px-3 py-1.5 rounded-full text-sm font-medium border">${c[1]} <span class="opacity-60">${c[2]}</span></button>`).join('')}</div>
     <p class="text-sm text-slate-500 whitespace-nowrap"><span id="pc"></span> <button id="px" class="ml-2 text-emerald-800 font-medium hover:underline">Clear</button></p></div></div><div id="pr"></div>`;
   const paint = () => {
     const l = window._pl = filterPlans(all);
@@ -351,7 +385,7 @@ function layout({ brand, nav, views, alias = {}, support = false, badges = null,
 }
 
 // ===== transaction history: payments + payouts in one list, date filters, PDF invoices and statements =====
-const CO = { name: "Noble's Groceries", phone: SUPPORT_PHONE };
+const CO = { name: "Nobles Groceries", phone: SUPPORT_PHONE };
 const lagosDay = s => toL(parseTs(s)).toISOString().slice(0, 10);                      // YYYY-MM-DD on the Lagos calendar
 const addDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const todayL = () => lagosDay(new Date().toISOString());
