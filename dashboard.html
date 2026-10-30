@@ -61,37 +61,27 @@ window.pay = async sid => {
   am.oninput = paint; paint();
   const iv = setInterval(() => document.body.contains(am) ? paint() : clearInterval(iv), 15000);   // re-check when a deadline passes
 };
-// Requesting a payout: the ₦3,000 clearance fee is paid first; the server sends the request once Flutterwave confirms it.
-window.payout = sid => modal('Request payout',
-  `<div class="rounded-lg border bg-amber-50 border-amber-200 text-amber-800 p-3 text-sm">A clearance fee of <b>${naira(FEES.clearance)}</b> is paid with every payout request. Your request is sent to the admin as soon as the fee is confirmed.</div>` + fld('Delivery or bank details', 'note', '', 'text', 'required'),
-  async d => { await payFee({ type: 'clearance', subscription: sid, details: d.note }); toast('Payout requested (demo)'); },
-  'Pay ' + naira(FEES.clearance) + ' and request payout');
-
-// The t-shirt fee comes first: until it is paid the member only sees this page (the server enforces it as well).
-const needShirt = () => U().role !== 'admin' && !U().shirt_paid;
-function gate() {
-  const u = U();
-  $('#app').innerHTML = `<div class="min-h-screen grid place-items-center p-4 bg-slate-50"><div class="w-full max-w-lg bg-white border rounded-2xl p-6 sm:p-8 shadow-sm">
-    <div class="flex items-center gap-3"><img src="logo.jpeg" alt="" class="w-10 h-10 rounded-lg object-cover"><span class="font-semibold text-slate-900">Nobles Groceries</span></div>
-    <h1 class="text-xl font-semibold text-slate-900 mt-6">Complete your registration</h1>
-    <p class="text-sm text-slate-600 mt-2 leading-relaxed">Welcome${u.name ? ', ' + esc(u.name.split(' ')[0]) : ''}. Every member pays a one-time <b>${naira(FEES.shirt)}</b> for the Nobles Groceries t-shirt. Until it is paid you are an unregistered member and cannot join a plan, make a payment or request a payout.</p>
-    <button id="gp" class="${btn} w-full py-2.5 mt-5">Pay ${naira(FEES.shirt)} with Flutterwave</button>
-    <p class="text-xs text-slate-500 mt-2">You pay securely on Flutterwave. Your account is registered automatically as soon as the payment is confirmed.</p>
-    <details class="mt-6 text-sm"><summary class="cursor-pointer font-medium text-slate-700">Other fees you should know about</summary><p class="mt-2 text-slate-600 leading-relaxed">A joining fee of <b>${naira(FEES.join)}</b> is paid each time you join a plan, and a clearance fee of <b>${naira(FEES.clearance)}</b> is paid with every payout request. <a href="terms.html" target="_blank" class="text-emerald-800 underline">Read the full terms</a>.</p></details>
-    <div class="flex items-center justify-between mt-6 pt-4 border-t text-sm"><a href="${waLink()}" target="_blank" rel="noopener" class="text-slate-600 hover:text-slate-900">Customer support</a><button onclick="logout()" class="text-slate-600 hover:text-slate-900">Log out</button></div></div></div>`;
-  $('#gp').onclick = async () => {
-    const b = $('#gp'), t = b.textContent; b.disabled = true; b.textContent = 'Please wait…';
-    try { await payFee({ type: 'shirt' }); toast('T-shirt fee paid (demo). You are now registered.'); setTimeout(() => location.reload(), 800); }
-    catch (x) { toast(x.message, 1); b.disabled = false; b.textContent = t; }
-  };
-  // the payment may be confirmed by Flutterwave's webhook while this page is open
-  setInterval(async () => { try { await pb.collection('users').authRefresh(); if (U().shirt_paid) location.reload(); } catch (x) { } }, 6000);
-}
+// Requesting a payout. Three things are checked first (the server enforces them as well):
+//   1) another plan must be actively running, 2) the one-time ₦5,000 t-shirt fee must be paid, 3) then the ₦3,000 clearance fee is paid
+//   and the server sends the request once Flutterwave confirms it.
+window.payout = async sid => {
+  let list; try { list = await subs(); } catch (x) { return toast(x.message, 1); }
+  if (!runningOthers(list, sid, planOf).length) return toast(PAYOUT_NEEDS_PLAN, 1, 7000);
+  if (!U().shirt_paid) return modal('Pay the t-shirt fee first',
+    `<div class="rounded-lg border bg-amber-50 border-amber-200 text-amber-800 p-3 text-sm">Before your first payout you pay the one-time <b>${naira(FEES.shirt)}</b> t-shirt fee. You pay it once only, and only now because you are requesting a payout.</div><p class="text-sm text-slate-600">When it is confirmed you will be a registered member. Then come back to <b>My contributions</b> and request this payout (a ${naira(FEES.clearance)} clearance fee applies to the request).</p>`,
+    async () => { await payFee({ type: 'shirt' }); toast('T-shirt fee paid (demo). You can now request your payout.'); },
+    'Pay ' + naira(FEES.shirt) + ' with Flutterwave');
+  modal('Request payout',
+    `<div class="rounded-lg border bg-amber-50 border-amber-200 text-amber-800 p-3 text-sm">A clearance fee of <b>${naira(FEES.clearance)}</b> is paid with every payout request. Your request is sent to the admin as soon as the fee is confirmed.</div>` + fld('Delivery or bank details', 'note', '', 'text', 'required'),
+    async d => { await payFee({ type: 'clearance', subscription: sid, details: d.note }); toast('Payout requested (demo)'); },
+    'Pay ' + naira(FEES.clearance) + ' and request payout');
+};
 
 const startApp = () => layout({ brand: "Nobles Groceries", nav: [['overview', 'Overview'], ['plans', 'Browse plans'], ['mine', 'My contributions'], ['payments', 'Transaction history'], ['fees', 'Fees paid'], ['payouts', 'Payouts'], ['rules', 'Rules and fees'], ['profile', 'Profile']], views: {
   async overview(m) {
     const [s, p] = await Promise.all([subs(), pays()]), act = s.filter(x => x.status === 'active');
     m.innerHTML = head('Welcome back, ' + esc((U().name || 'there').split(' ')[0]), 'A summary of your savings activity.', `<a href="#plans" class="${btn}">Browse plans</a>`)
+      + (U().role !== 'admin' && !U().shirt_paid ? `<div class="mb-6 rounded-xl border bg-amber-50 border-amber-200 text-amber-800 p-4 text-sm">You can browse and join plans and make payments freely. The one-time <b>${naira(FEES.shirt)}</b> t-shirt fee is only needed when you request a payout.</div>` : '')
       + '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">' + stat('Active plans', act.length) + stat('Total contributed', naira(sum(p)), 'Confirmed savings, excluding penalties') + stat('Awaiting confirmation', p.filter(x => x.status === 'pending').length, 'Payments under review') + stat('Expected payout', naira(act.reduce((a, x) => a + (planOf(x).payout || 0), 0)), 'Across active plans') + '</div>'
       + '<div class="grid lg:grid-cols-5 gap-6"><div class="lg:col-span-2"><h2 class="text-sm font-semibold mb-3">Active plans</h2>' + (act.length ? '<div class="space-y-3">' + act.map(x => { const pl = planOf(x), t = pl.amount * pl.duration, pc = Math.min(100, Math.round(sum(p, x.id) / t * 100) || 0); return `<a href="#mine" class="block bg-white border rounded-xl p-4 hover:border-emerald-700"><div class="flex justify-between text-sm"><span class="font-medium">${esc(pl.name)}</span><span class="text-slate-500">${pc}%</span></div>${bar(pc)}<p class="text-xs text-slate-500 mt-2">${dueLine(planState(x, pl, p), pl.frequency)}</p></a>`; }).join('') + '</div>' : `<div class="bg-white border border-dashed rounded-xl p-6 text-sm text-slate-500">You have not joined a plan yet. <a href="#plans" class="text-emerald-800 font-medium">Browse plans</a></div>`) + '</div>'
       + '<div class="lg:col-span-3"><div class="flex justify-between mb-3"><h2 class="text-sm font-semibold">Recent payments</h2><a href="#payments" class="text-sm text-emerald-800 font-medium">View all</a></div>' + table(['Date', 'Plan', 'Amount', 'Status'], p.slice(0, 5).map(x => [date(x.created), esc(planOf(x.expand?.subscription || {}).name), naira(x.amount), badge(x.status)])) + '</div></div>';
@@ -106,12 +96,14 @@ const startApp = () => layout({ brand: "Nobles Groceries", nav: [['overview', 'O
     m.innerHTML = head('My contributions', 'Track progress, due dates and penalties on every plan you have joined.') + (s.length ? '<div class="grid md:grid-cols-2 gap-4">' + s.map(x => {
       const pl = planOf(x), t = pl.amount * pl.duration, paid = sum(p, x.id), pc = Math.min(100, Math.round(paid / t * 100) || 0), st = planState(x, pl, p);
       // payouts open only once the whole saving period has run its course (and every payment is confirmed)
-      const end = termEnd(x, pl), over = Date.now() >= end.getTime(), reqs = po.filter(o => o.subscription === x.id), done = reqs.some(o => o.status === 'confirmed'), asked = reqs.some(o => o.status === 'pending');
+      const other = runningOthers(s, x.id, planOf).length > 0, end = termEnd(x, pl), over = Date.now() >= end.getTime(), reqs = po.filter(o => o.subscription === x.id), done = reqs.some(o => o.status === 'confirmed'), asked = reqs.some(o => o.status === 'pending');
       const payAct = paid < t || x.status === 'cancelled' ? '' : done ? '<span class="text-sm font-medium text-emerald-800 self-center">Paid out</span>'
         : asked ? '<span class="text-sm font-medium text-amber-800 self-center">Payout requested · awaiting admin</span>'
+        : over && !other ? `<button disabled title="Join another plan to unlock this payout" class="${btn2} opacity-50 cursor-not-allowed">Request payout</button>`
         : over ? `<button onclick="payout('${x.id}')" class="${btn2}">Request payout</button>`
         : `<button disabled title="Opens ${fmtDay(end)}" class="${btn2} opacity-50 cursor-not-allowed">Request payout</button>`;
-      const termLine = x.status === 'cancelled' || done ? '' : `<p class="text-xs text-slate-500 mt-1">${over ? 'Saving period complete.' : `Saving period ends <b class="font-medium text-slate-700">${fmtDay(end)}</b>. Payout opens then.`}</p>`;
+      const termLine = x.status === 'cancelled' || done ? '' : `<p class="text-xs text-slate-500 mt-1">${over ? 'Saving period complete.' : `Saving period ends <b class="font-medium text-slate-700">${fmtDay(end)}</b>. Payout opens then.`}</p>`
+        + (over && paid >= t && !asked && !other ? `<p class="text-xs text-amber-800 mt-1">To request this payout you need another plan actively running. <a href="#plans" class="underline font-medium">Join a plan</a></p>` : '');
       return `<div class="bg-white border rounded-xl p-5"><div class="flex justify-between items-start gap-3"><h3 class="font-semibold">${esc(pl.name)}</h3>${badge(x.status)}</div><p class="text-sm text-slate-500 mt-1">${naira(pl.amount)} ${pl.frequency} · ${monthsLabel(pl)} · started ${date(x.created)}</p>${bar(pc)}<p class="text-sm mt-2">${naira(paid)} of ${naira(t)} <span class="text-slate-500">(${pc}%)</span></p><p class="text-xs text-slate-500 mt-1">${st.paid} of ${pl.duration} ${FQ[pl.frequency]}s covered (including payments awaiting confirmation)</p>${termLine}${x.status === 'active' ? `<p class="text-sm text-slate-500 mt-3">${dueLine(st, pl.frequency)}</p>` : ''}<div class="flex flex-wrap gap-2 mt-4">${x.status === 'active' && st.left ? `<button onclick="pay('${x.id}')" class="${btn}">Make payment</button>` : ''}${payAct}</div></div>`;
     }).join('') + '</div>' : table([], []));
   },
@@ -146,13 +138,13 @@ const startApp = () => layout({ brand: "Nobles Groceries", nav: [['overview', 'O
     toast('Confirming your payment…', 0, 4000);
     try {
       const r = await pb.send('/api/noble/pay/verify', { method: 'POST', body: { tx_ref: ref, cancelled: sp.get('status') === 'cancelled' } });
-      const done = { payment: 'Payment confirmed. Thank you!', shirt: 'Payment confirmed. You are now a registered member!', join: 'Payment confirmed. You have joined the plan!', clearance: 'Clearance fee confirmed. Your payout request has been sent.' };
+      const done = { payment: 'Payment confirmed. Thank you!', shirt: 'Payment confirmed. You are now a registered member and can request your payout!', join: 'Payment confirmed. You have joined the plan!', clearance: 'Clearance fee confirmed. Your payout request has been sent.' };
       toast(r.status === 'confirmed' ? (done[r.type] || done.payment) : r.status === 'rejected' ? 'That payment was not completed.' : 'We have not received confirmation yet. This page updates automatically once it arrives.', r.status === 'rejected', 7000);
-      if (r.status === 'confirmed') history.replaceState(null, '', location.pathname + '#' + ({ join: 'mine', clearance: 'payouts', shirt: 'overview' }[r.type] || 'payments'));
+      if (r.status === 'confirmed') history.replaceState(null, '', location.pathname + '#' + ({ join: 'mine', clearance: 'payouts', shirt: 'mine' }[r.type] || 'payments'));
     } catch (x) { toast(x.message, 1); }
   }
   try { await pb.collection('users').authRefresh(); } catch (x) { }   // picks up a freshly confirmed registration
-  needShirt() ? gate() : startApp();
+  startApp();   // every member can use the dashboard; the t-shirt fee is only asked for when requesting a payout
 })();
 }
 </script></body></html>

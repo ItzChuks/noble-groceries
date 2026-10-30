@@ -64,22 +64,24 @@ function createMockPB() {
   // demo stand-in for the server's Flutterwave routes: a payment is "paid" and confirmed instantly
   const send = async (path, o = {}) => {
     const b = o.body || {};
-    const me = db.users.find(u => u.id === aid), NEED = 'Please pay the one-time ₦5,000 t-shirt registration fee first.';
+    const me = db.users.find(u => u.id === aid), NEED = 'Please pay the one-time ₦5,000 t-shirt fee before you request a payout.';
     if (path.endsWith('/fee/init')) {
       const t = b.type, amt = { shirt: 5000, join: 3000, clearance: 3000 }[t];
       if (!amt) throw new Error('Unknown fee.');
       if (t === 'shirt') { if (me.shirt_paid) throw new Error('You have already paid the t-shirt fee.'); me.shirt_paid = true; me.shirt_paid_at = now(); emit('users', 'update', me); }
       else {
-        if (!me.shirt_paid) throw new Error(NEED);
         if (t === 'join') { const s = { id: uid(), created: now(), user: aid, plan: b.plan, status: 'active' }; db.subscriptions.push(s); emit('subscriptions', 'create', s); }
-        else { if (!String(b.details || '').trim()) throw new Error('Enter your delivery or bank details.'); const p = { id: uid(), created: now(), user: aid, subscription: b.subscription, note: b.details, status: 'pending' }; db.payouts.push(p); emit('payouts', 'create', p); }
+        else {
+          const planOf = s => db.plans.find(p => p.id === s.plan) || {};
+          if (!runningOthers(db.subscriptions.filter(s => s.user === aid), b.subscription, planOf).length) throw new Error(PAYOUT_NEEDS_PLAN);
+          if (!me.shirt_paid) throw new Error(NEED);
+          if (!String(b.details || '').trim()) throw new Error('Enter your delivery or bank details.'); const p = { id: uid(), created: now(), user: aid, subscription: b.subscription, note: b.details, status: 'pending' }; db.payouts.push(p); emit('payouts', 'create', p); }
       }
       const f = { id: uid(), created: now(), user: aid, type: t, amount: amt, status: 'confirmed', plan: b.plan || '', subscription: b.subscription || '', details: b.details || '', note: 'Flutterwave (demo)' };
       db.fees.push(f); save(); emit('fees', 'create', f);
       return { demo: true };
     }
     if (path.endsWith('/pay/init')) {
-      if (!me.shirt_paid) throw new Error(NEED);
       const sub = db.subscriptions.find(s => s.id === b.subscription), pl = db.plans.find(p => p.id === sub.plan);
       const q = quoteFor(planState(sub, pl, db.payments.filter(p => p.subscription === sub.id)), +b.amount);
       if (!q.ok) throw new Error('Wrong amount.');

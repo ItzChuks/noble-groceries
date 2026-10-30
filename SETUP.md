@@ -66,9 +66,10 @@ Browser code can be edited by anyone, so the rules that matter are checked on th
 
 ## Fees, registration and terms
 
-- **T-shirt registration (₦5,000, one time, compulsory)**: until it is paid a member only sees a "Complete your registration" page. Admin > Users shows *Registered* and *Unregistered* members (with filter tabs) and can mark someone registered or unregistered by hand (for example after an offline payment).
+- **T-shirt fee (₦5,000, one time)**: members can use the whole dashboard, join plans and pay contributions without it. It is only required when they request a payout: the *Request payout* button first asks for this fee (once only), then the clearance fee. Admin > Users shows *Registered* and *Unregistered* members (with filter tabs) and can mark someone registered or unregistered by hand (for example after an offline payment).
 - **Joining fee (₦3,000)**: paid each time a member joins a plan; the plan is joined automatically once Flutterwave confirms it.
 - **Payout clearance fee (₦3,000)**: paid with every payout request; the request is sent automatically once confirmed.
+- **Another plan must be running**: a payout can be requested from a plan only if the member has *another* plan that is active and whose saving period has not ended. Otherwise the button is disabled with a "Join a plan" hint, and the server refuses it too (`runningElsewhere` in `pb_hooks/fees.js`).
 - All fees appear under Admin > Fees and, for members, under *Fees paid*. Amounts: `FEES` at the top of `app.js` (display) and `pb_hooks/fees.js` on the backend (charged). Keep both in sync.
 - **Terms and Conditions**: `terms.html` (text lives in `termsHTML()` in `app.js`). Sign-up requires ticking the acceptance box; the server rejects sign-ups without it and stores `terms_accepted_at`.
 - **Foodie** is a third plan category next to cash and grocery (Admin > Plans > Add plan).
