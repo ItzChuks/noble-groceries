@@ -25,7 +25,7 @@ const FQ = { daily: 'day', weekly: 'week', monthly: 'month' };
 // A plan's saving period is set in months; the number of payments follows from the frequency (daily ~30.4/month, weekly ~4.35/month, monthly 1/month)
 const paymentsFor = (months, f) => f === 'daily' ? Math.round(months * 365 / 12) : f === 'weekly' ? Math.round(months * 52.14 / 12) : months;
 const monthsOf = p => p.months > 0 ? p.months : Math.max(1, Math.round(p.duration * (p.frequency === 'daily' ? 12 / 365 : p.frequency === 'weekly' ? 12 / 52.14 : 1)));
-const monthsLabel = p => { const m = monthsOf(p); return m + ' month' + (m === 1 ? '' : 's'); };
+const monthsLabel = p => { if (isSeasonal(p)) return 'Jan 1 – Nov 30'; const m = monthsOf(p); return m + ' month' + (m === 1 ? '' : 's'); };
 const ic = d => `<svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="${d}"/></svg>`;
 const WA_PATH = 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z';
 const waIcon = (cls = 'w-[18px] h-[18px]') => `<svg class="${cls} shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${WA_PATH}"/></svg>`;
@@ -34,7 +34,7 @@ const waLink = () => {
   const t = "Hello Nobles Groceries support, I need some help." + (u ? '\nName: ' + (u.name || '') + '\nEmail: ' + (u.email || '') : '');
   return 'https://wa.me/' + SUPPORT_WHATSAPP + '?text=' + encodeURIComponent(t);
 };
-const IC = { overview: 'M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-3H4z', plans: 'M4 6h16M4 12h16M4 18h10', mine: 'M4 20V10M10 20V4M16 20v-7M22 20H2', payments: 'M3 6h18v12H3zM3 10h18', fees: 'M3 6h18v12H3zM3 10h18', payouts: 'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14', profile: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0', users: 'M16 20v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM21 20v-1a4 4 0 00-3-3.9', subs: 'M9 12l2 2 4-4M5 4h14v16H5z', out: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h9', menu: 'M4 6h16M4 12h16M4 18h16', moon: 'M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z', sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4', rules: 'M9 12h6M9 16h6M7 3h8l4 4v14H7zM15 3v4h4', search: 'M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z' };
+const IC = { overview: 'M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-3H4z', plans: 'M4 6h16M4 12h16M4 18h10', mine: 'M4 20V10M10 20V4M16 20v-7M22 20H2', payments: 'M3 6h18v12H3zM3 10h18', fees: 'M3 6h18v12H3zM3 10h18', payouts: 'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14', profile: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0', users: 'M16 20v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM21 20v-1a4 4 0 00-3-3.9', subs: 'M9 12l2 2 4-4M5 4h14v16H5z', out: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h9', menu: 'M4 6h16M4 12h16M4 18h16', moon: 'M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z', sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4', rules: 'M9 12h6M9 16h6M7 3h8l4 4v14H7zM15 3v4h4', wallet: 'M3 7h16a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2zM3 7l2-3h12v3M16 13.5h2', search: 'M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z' };
 
 // ===== theme (light / dark) =====
 const THEME_KEY = 'noble_theme';
@@ -105,8 +105,46 @@ function dueAt(freq, first, i) {
   if (freq === 'weekly') return fromL(y, m, d + 7 * i, RULES.cutoffHour);
   return fromL(y, m + i, RULES.monthlyGraceDay, 23, 59, 59);
 }
+// ---- seasons: cash and foodie plans run on a fixed season, 1 January to 30 November. Someone who joins mid-season owes (as a catch-up, no penalty)
+//      every instalment whose deadline has already passed. Grocery plans simply run from the day the member joins. ----
+const SEASON = { endMonth: 10 /* November */, endDay: 30 };
+const isSeasonal = p => p.category === 'cash' || p.category === 'foodie';
+function seasonFirst(freq, y) {
+  if (freq === 'daily') return fromL(y, 0, 1, RULES.cutoffHour);
+  if (freq === 'weekly') { const w = new Date(Date.UTC(y, 0, 1)).getUTCDay(); return fromL(y, 0, 1 + (RULES.weeklyDay - w + 7) % 7, RULES.cutoffHour); }
+  return fromL(y, 1, RULES.monthlyGraceDay, 23, 59, 59);                  // January's instalment, due 2 February
+}
+function seasonCount(freq, y) {
+  const days = Math.round((Date.UTC(y, SEASON.endMonth, SEASON.endDay) - Date.UTC(y, 0, 1)) / 864e5);
+  if (freq === 'daily') return days + 1;
+  if (freq === 'weekly') { const w = new Date(Date.UTC(y, 0, 1)).getUTCDay(), add = (RULES.weeklyDay - w + 7) % 7; return Math.floor((days - add) / 7) + 1; }
+  return SEASON.endMonth + 1;
+}
+// the season someone joining at "joined" belongs to: this year's, unless every instalment of it is already due
+const seasonYear = (freq, joined) => { const y = toL(joined).getUTCFullYear(); return dueAt(freq, seasonFirst(freq, y), seasonCount(freq, y) - 1) > joined ? y : y + 1; };
+// the schedule of one subscription: { first, n (number of instalments), due(i), season? }
+function sched(sub, pl) {
+  const f = pl.frequency, joined = parseTs(sub.created);
+  if (!isSeasonal(pl)) { const first = firstDue(f, joined); return { first, n: pl.duration, due: i => dueAt(f, first, i) }; }
+  const y = seasonYear(f, joined), first = seasonFirst(f, y);
+  return { first, n: seasonCount(f, y), due: i => dueAt(f, first, i), season: y };
+}
+// instalments already due at the moment of joining = the catch-up owed by someone who joins a cash/foodie plan mid-season
+const catchupCount = (sub, pl) => { if (!isSeasonal(pl)) return 0; const S = sched(sub, pl), t = parseTs(sub.created); let c = 0; while (c < S.n && S.due(c) <= t) c++; return c; };
+// what a plan looks like to someone about to join it right now (used on plan cards and in the join window)
+const planNow = p => isSeasonal(p) ? sched({ created: new Date().toISOString() }, p) : { n: p.duration };
+const nPay = p => planNow(p).n;
+const totalOf = p => p.amount * nPay(p);
+const payoutOf = p => isSeasonal(p) ? totalOf(p) : p.payout;
+// when an instalment becomes collectable from the wallet: from the start of its period (daily: midnight, weekly: Monday, monthly: the 1st), never before the season starts
+function collectAt(sub, pl, i) {
+  const S = sched(sub, pl), L = toL(S.due(i)), y = L.getUTCFullYear(), m = L.getUTCMonth(), d = L.getUTCDate();
+  const t = pl.frequency === 'daily' ? fromL(y, m, d, 0) : pl.frequency === 'weekly' ? fromL(y, m, d - 4, 0) : fromL(y, m, 1, 0);
+  if (!S.season) return t;
+  const start = fromL(S.season, 0, 1, 0); return t < start ? start : t;
+}
 // when the saving period ends = deadline of the last instalment; payouts open after this moment
-const termEnd = (sub, pl) => dueAt(pl.frequency, firstDue(pl.frequency, parseTs(sub.created)), pl.duration - 1);
+const termEnd = (sub, pl) => { const S = sched(sub, pl); return S.due(S.n - 1); };
 const PAYOUT_NEEDS_PLAN = 'To request a payout you must have another plan actively running. Join a new plan first, then request this payout.';
 // the member's OTHER plans that are still running: active, and their saving period has not ended yet (plOf gives a subscription's plan)
 const runningOthers = (subs, sid, plOf) => subs.filter(o => o.id !== sid && o.status === 'active' && plOf(o).frequency && Date.now() < termEnd(o, plOf(o)).getTime());
@@ -116,21 +154,20 @@ const instOf = (p, pl) => p.installments || Math.max(1, Math.round(((p.amount ||
 
 // where a subscription stands right now: instalments covered, overdue count, next deadline, cost of each next instalment
 function planState(sub, pl, pays, now = new Date()) {
-  const A = pl.amount, pen = A * (RULES.lateMultiplier - 1);
+  const A = pl.amount, pen = A * (RULES.lateMultiplier - 1), S = sched(sub, pl), due = S.due;
   const paid = pays.filter(p => p.subscription === sub.id && p.status !== 'rejected').reduce((a, p) => a + instOf(p, pl), 0);
-  const left = Math.max(0, pl.duration - paid), first = firstDue(pl.frequency, parseTs(sub.created)), due = i => dueAt(pl.frequency, first, i);
+  const left = Math.max(0, S.n - paid);
   let overdue = 0; while (overdue < left && due(paid + overdue) <= now) overdue++;
-  return { A, pen, paid, left, duration: pl.duration, due, overdue, next: left ? due(paid) : null, cost: k => A + (k < overdue ? pen : 0) };
+  return { A, pen, paid, left, duration: S.n, due, overdue, next: left ? due(paid) : null, cost: k => A + (k < overdue ? pen : 0) };
 }
-// validate a typed amount: it must be a whole number of instalments, late ones including their penalty
-function quoteFor(st, amount) {
-  const cum = [0];
-  for (let k = 0; k < st.left && cum[k] < amount; k++) cum.push(cum[k] + st.cost(k));
-  const n = cum.indexOf(amount), c = Math.max(n, 0), late = Math.min(c, st.overdue);
-  return { ok: n > 0, n: c, cum, total: amount, base: c * st.A, late, penalty: late * st.pen,
-    max: st.left * st.A + Math.min(st.overdue, st.left) * st.pen,
-    next: n > 0 && st.paid + n < st.duration ? st.due(st.paid + n) : null,
-    lower: [...cum].reverse().find(v => v > 0 && v < amount), higher: cum.find(v => v > amount) };
+// Wallet view of one subscription: is its next instalment ready to be collected, and is the wallet able to cover it?
+//   'done' fully paid | 'scheduled' not collectable yet (shows when) | 'waiting' ready but the wallet is short (shows how much to add)
+function walletStatus(sub, pl, st, bal, now = new Date()) {
+  if (!st.left) return { s: 'done' };
+  const at = collectAt(sub, pl, st.paid);
+  if (at > now) return { s: 'scheduled', at };
+  const cost = st.cost(0);
+  return bal >= cost ? { s: 'ready', cost } : { s: 'waiting', cost, short: cost - bal };
 }
 // ===== end payment rules =====
 
@@ -140,46 +177,47 @@ const covers = p => { const pl = p.expand?.subscription?.expand?.plan || {}; ret
 const feeRulesHTML = () => {
   const c = (t, d) => `<div class="bg-white border rounded-xl p-5"><h3 class="font-semibold text-slate-900 text-sm">${t}</h3><p class="text-sm text-slate-600 mt-1.5 leading-relaxed">${d}</p></div>`;
   return '<div class="grid md:grid-cols-2 gap-4 max-w-4xl">'
-    + c(`T-shirt registration · ${naira(FEES.shirt)}`, `A <b>one-time</b> payment for your Nobles Groceries t-shirt. You can use your dashboard, join plans and make contributions without paying it. It is only required <b>when you request a payout</b>: your payout request cannot be sent until it is confirmed. Once it is confirmed you become a <b>registered</b> member.`)
-    + c(`Joining fee · ${naira(FEES.join)}`, `Before you can join any plan you pay a ${naira(FEES.join)} joining fee. It is paid each time you join a plan, separately from your contributions, and you join the plan as soon as the payment is confirmed.`)
-    + c(`Payout clearance fee · ${naira(FEES.clearance)}`, `Every payout request carries a ${naira(FEES.clearance)} clearance fee. Your request is sent to the admin as soon as the fee is confirmed.`)
+    + c('Your wallet', `Every member has a <b>wallet</b> on the dashboard. You add money to it by bank transfer to your own fixed account number, and the transfer is confirmed automatically in real time. Every fee and every contribution is taken from your wallet.`)
+    + c(`Registration (joining) fee · ${naira(FEES.join)}`, `Before you can join any plan, ${naira(FEES.join)} is taken from your wallet. It is paid each time you join a plan, separately from your contributions. If your wallet is short, you will be asked to top up first.`)
+    + c('Cash and Foodie seasons', `Cash and Foodie savings run from <b>1 January to 30 November</b>. If you join part-way through the season (for example in March), you first pay the contributions that have fallen due <b>from January up to the day you join</b>, taken from your wallet together with the joining fee. There is no penalty on those.`)
+    + c(`T-shirt registration · ${naira(FEES.shirt)}`, `A <b>one-time</b> payment for your Nobles Groceries t-shirt, taken from your wallet. It is only required <b>when you request a payout</b>. Once it is paid you become a <b>registered</b> member.`)
+    + c(`Payout clearance fee · ${naira(FEES.clearance)}`, `Every payout request carries a ${naira(FEES.clearance)} clearance fee, taken from your wallet. Your request is sent to the admin as soon as it is paid.`)
     + c('Another plan must be running', `Before you can request a payout from a plan, you must have <b>another plan actively running</b>: a plan you have joined whose saving period has not ended. If you have none, join a new plan first, then request your payout.`)
-    + c('Plan length', `Each plan shows its exact number of payments (for example 12 or 13 weeks, or 50 or 52 weeks). You pay for exactly the number of payments shown on the plan you join.`)
     + '</div>';
 };
 const termsHTML = () => {
   const m = RULES.lateMultiplier, S = (n, t, body) => `<section class="bg-white border rounded-xl p-5 sm:p-6"><h2 class="font-semibold text-slate-900">${n}. ${t}</h2><div class="text-sm text-slate-600 mt-2 leading-relaxed space-y-2">${body}</div></section>`;
   return '<div class="space-y-4">'
     + S(1, 'About these terms', `<p>Nobles Groceries is a budget and isusu savings platform where members contribute daily, weekly or monthly towards a cash or goods payout. By creating an account you confirm that you have read, understood and accepted these Terms and Conditions, including every fee listed below.</p>`)
-    + S(2, 'The t-shirt fee', `<p>Every member pays a one-time fee of <b>${naira(FEES.shirt)}</b> for the Nobles Groceries t-shirt.</p><p>You can create an account, use your dashboard, join plans and make contributions <b>without</b> paying this fee. The fee only becomes payable <b>when you want to request a payout</b>: a payout request cannot be sent until the t-shirt fee has been confirmed. When the payment is confirmed your account becomes <b>registered</b>. The fee is paid once only and does not have to be paid again for later payouts.</p>`)
-    + S(3, 'Joining fee', `<p>Before you can join any plan you must pay a joining fee of <b>${naira(FEES.join)}</b>. It is paid each time you join a plan. It is separate from your contributions and you join the plan once the payment is confirmed.</p>`)
-    + S(4, 'Plans', `<p>We offer three kinds of plan: <b>Cash</b>, <b>Groceries</b> and <b>Foodie</b>. Every plan shows its contribution amount, how often you pay, its saving period, the number of payments and the payout. The number of payments can differ between plans (for example 12 or 13 weeks, or 50 or 52 weeks) and you pay for exactly the number of payments shown on the plan you join.</p>`)
-    + S(5, 'Contributions, deadlines and late penalties', `<p>All deadlines use Lagos time (WAT). Daily plans are due before <b>${RULES.cutoffHour}:00 noon</b> each day. Weekly plans are due by <b>Friday ${RULES.cutoffHour}:00 noon</b>. Monthly plans are due by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>.</p><p>A late payment costs double (for example ${naira(100)} becomes ${naira(100 * m)}). The extra amount is a penalty: it does not count towards your savings or payout. You may pay several instalments in advance.</p>`)
-    + S(6, 'Payouts and the clearance fee', `<p>You can request a payout from a plan only when <b>all</b> of the following are true:</p><ul class="list-disc pl-5 space-y-1"><li>the plan is fully paid and its saving period has ended;</li><li><b>you have another plan actively running</b>: a plan you have joined, other than the one you are collecting, whose saving period has not yet ended. If you have none, you must join a new plan before you can request the payout;</li><li>you have paid the one-time ${naira(FEES.shirt)} t-shirt fee (see section 2).</li></ul><p>Every payout request also carries a clearance fee of <b>${naira(FEES.clearance)}</b>. Your request is sent as soon as the clearance fee is confirmed.</p>`)
-    + S(7, 'Payments', `<p>Payments are made securely through Flutterwave and are confirmed automatically once they go through. You can see every payment, fee and payout on your dashboard.</p>`)
-    + S(8, 'Questions', `<p>For any question about these terms, contact customer support on <b>${SUPPORT_PHONE}</b>.</p>`)
+    + S(2, 'Your wallet and your account number', `<p>Every member has a <b>wallet</b> on their dashboard and a <b>fixed virtual bank account number</b> of their own. You fund your wallet by transferring money to that account number. The transfer is confirmed automatically, usually within moments, and the money appears in your wallet.</p><p>All fees and contributions are paid <b>from your wallet</b>. Money in your wallet stays yours until a fee or contribution is taken from it under these terms.</p>`)
+    + S(3, 'Registration (joining) fee', `<p>Before you can join any plan, a registration fee of <b>${naira(FEES.join)}</b> is deducted from your wallet. It is paid each time you join a plan and is separate from your contributions. If your wallet does not hold enough, you cannot join until you top up.</p>`)
+    + S(4, 'Plans and seasons', `<p>We offer three kinds of plan: <b>Cash</b>, <b>Groceries</b> and <b>Foodie</b>. Every plan shows its contribution amount, how often you pay, its saving period, the number of payments and the payout.</p><p><b>Cash and Foodie</b> savings run from <b>1 January to 30 November</b>. If you join after the season has started, you must first pay the contributions that fell due from 1 January up to the day you join. This catch-up is calculated automatically, is taken from your wallet together with the registration fee, and carries no penalty. <b>Groceries</b> plans run from the day you join, for the number of payments shown on the plan.</p>`)
+    + S(5, 'Automatic payments, deadlines and late penalties', `<p>You do not pay each contribution by hand. At the start of each payment period your plan's contribution is taken from your wallet automatically. If you have several plans and your wallet cannot cover them all, plans are served from the oldest deadline first; a plan that cannot be covered <b>waits</b> and is paid automatically as soon as you top up.</p><p>All deadlines use Lagos time (WAT). Daily plans are due before <b>${RULES.cutoffHour}:00 noon</b> each day. Weekly plans are due by <b>Friday ${RULES.cutoffHour}:00 noon</b>. Monthly plans are due by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>.</p><p>A contribution that is still unpaid after its deadline costs double when it is collected (for example ${naira(100)} becomes ${naira(100 * m)}). The extra amount is a penalty: it does not count towards your savings or payout. Keep enough in your wallet to avoid it.</p>`)
+    + S(6, 'The t-shirt fee', `<p>Every member pays a one-time fee of <b>${naira(FEES.shirt)}</b> for the Nobles Groceries t-shirt, taken from the wallet. You can use your dashboard, join plans and make contributions without paying it. It only becomes payable <b>when you want to request a payout</b>. It is paid once only.</p>`)
+    + S(7, 'Payouts and the clearance fee', `<p>You can request a payout from a plan only when <b>all</b> of the following are true:</p><ul class="list-disc pl-5 space-y-1"><li>the plan is fully paid and its saving period has ended;</li><li><b>you have another plan actively running</b>: a plan you have joined, other than the one you are collecting, whose saving period has not yet ended. If you have none, you must join a new plan before you can request the payout;</li><li>you have paid the one-time ${naira(FEES.shirt)} t-shirt fee (see section 6).</li></ul><p>Every payout request also carries a clearance fee of <b>${naira(FEES.clearance)}</b>, taken from your wallet. Your request is sent as soon as it is paid.</p>`)
+    + S(8, 'Records', `<p>Every top-up, fee and contribution is recorded in your wallet history on your dashboard, and you can see every payment and payout there.</p>`)
+    + S(9, 'Questions', `<p>For any question about these terms, contact customer support on <b>${SUPPORT_PHONE}</b>.</p>`)
     + '</div>';
 };
 const rulesHTML = () => {
   const m = RULES.lateMultiplier, c = (t, d) => `<div class="bg-white border rounded-xl p-5"><h3 class="font-semibold text-slate-900 text-sm">${t}</h3><p class="text-sm text-slate-600 mt-1.5 leading-relaxed">${d}</p></div>`;
-  return '<h2 class="text-sm font-semibold text-slate-900 mb-3">Fees and registration</h2>' + feeRulesHTML() + '<h2 class="text-sm font-semibold text-slate-900 mt-8 mb-3">Payments and deadlines</h2><div class="grid md:grid-cols-2 gap-4 max-w-4xl">'
-    + c('Daily plans', `Pay before <b>${RULES.cutoffHour}:00 noon</b> each day. After noon the payment is doubled: ${naira(100)} becomes ${naira(100 * m)}.`)
-    + c('Weekly plans', `Pay any time from Monday up to <b>Friday ${RULES.cutoffHour}:00 noon</b>. After that the week's payment is doubled.`)
+  return '<h2 class="text-sm font-semibold text-slate-900 mb-3">Fees and registration</h2>' + feeRulesHTML() + '<h2 class="text-sm font-semibold text-slate-900 mt-8 mb-3">Automatic payments and deadlines</h2><div class="grid md:grid-cols-2 gap-4 max-w-4xl">'
+    + c('Paid from your wallet', `You never pay a contribution by hand. When a payment period opens, the contribution is taken from your wallet. Keep your wallet topped up and your plans run by themselves.`)
+    + c('Not enough in the wallet?', `If you have, say, three plans of ${naira(2000)} a day and ${naira(5000)} in your wallet, two plans are paid and the third <b>waits</b>. The moment you top up, it is paid automatically.`)
+    + c('Daily plans', `Taken at the start of each day and due before <b>${RULES.cutoffHour}:00 noon</b>. Still unpaid after noon, it costs double: ${naira(100)} becomes ${naira(100 * m)}.`)
+    + c('Weekly plans', `Taken from Monday and due by <b>Friday ${RULES.cutoffHour}:00 noon</b>. After that the week's payment is doubled.`)
     + c('Monthly plans', `Each month's payment is due by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>. After that it is doubled.`)
-    + c('Late penalty', `The payment form will not accept a late payment without its penalty. If several payments were missed, each one carries its own penalty. A penalty is a fee: it does not count towards your savings or payout.`)
-    + c('Paying ahead', `You can pay more than one instalment at once. On a ${naira(100)} daily plan, paying ${naira(500)} covers 5 days. The form shows how many it covers and when your next payment is due. The amount must be a whole number of instalments.`)
-    + c('Your first payment', `Daily: today before noon if you join before noon, otherwise tomorrow before noon. Weekly: the coming Friday noon (or the one after, if it has passed). Monthly: the 2nd of next month.`)
-    + c('Admin visibility', `Every payment that includes a penalty is flagged to the admin, with the penalty amount shown.`)
-    + c('Time and confirmation', `All deadlines use Lagos time (WAT), whatever your device clock says. Payments are made through Flutterwave and are confirmed automatically as soon as the payment goes through.`) + '</div>';
+    + c('Late penalty', `Every unpaid contribution carries its own penalty once its deadline has passed. A penalty is a fee: it does not count towards your savings or payout.`)
+    + c('Joining mid-season', `Cash and Foodie plans run from 1 January to 30 November. If you join in March, the contributions from January up to the day you join are worked out for you and taken from your wallet with the joining fee, with no penalty.`)
+    + c('Your first payment (Groceries)', `Daily: today before noon if you join before noon, otherwise tomorrow before noon. Weekly: the coming Friday noon (or the one after, if it has passed). Monthly: the 2nd of next month.`)
+    + c('Time and confirmation', `All deadlines use Lagos time (WAT), whatever your device clock says. Transfers into your account number are confirmed automatically in real time.`) + '</div>';
 };
 
-// Pays a fee through Flutterwave: the server decides the amount, we just say which fee (see pb_hooks/flutterwave.pb.js).
+// Pays a fee (or joins a plan) from the member's wallet: the server decides the amount and checks the balance (see pb_hooks/wallet.js and fees.js).
 // body: { type: 'shirt' } | { type: 'join', plan } | { type: 'clearance', subscription, details }
-async function payFee(body) {
-  const r = await pb.send('/api/noble/fee/init', { method: 'POST', body });
-  if (r.link) { toast('Taking you to Flutterwave…'); location.href = r.link; await new Promise(() => { }); }   // stay put until the browser leaves
-  return r;
-}
+const payFee = body => pb.send('/api/noble/fee/pay', { method: 'POST', body });
+// the signed-in member's wallet balance, read fresh from the server
+const walletBal = async () => (await pb.collection('users').getOne(pb.authStore.record.id)).wallet_balance || 0;
 
 function toast(m, err, ms = 3000) {
   const t = document.createElement('div');
@@ -249,7 +287,7 @@ function confirmBox({ title, message = '', confirmText = 'Confirm', cancelText =
 // ===== plan explorer: search, filters, sort, detail drawer with previous/next =====
 const PS = { q: '', cat: 'all', freq: 'all', bud: 'all', sort: 'amount-asc' };
 const BUD = { all: ['Any budget', () => true], a: ['Up to ₦500', p => p.amount <= 500], b: ['₦501 – ₦2,000', p => p.amount > 500 && p.amount <= 2000], c: ['Above ₦2,000', p => p.amount > 2000] };
-const SORT = { 'amount-asc': ['Amount: low to high', (a, b) => a.amount - b.amount], 'amount-desc': ['Amount: high to low', (a, b) => b.amount - a.amount], 'payout-desc': ['Payout: high to low', (a, b) => b.payout - a.payout], name: ['Name: A to Z', (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })] };
+const SORT = { 'amount-asc': ['Amount: low to high', (a, b) => a.amount - b.amount], 'amount-desc': ['Amount: high to low', (a, b) => b.amount - a.amount], 'payout-desc': ['Payout: high to low', (a, b) => payoutOf(b) - payoutOf(a)], name: ['Name: A to Z', (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })] };
 const matchQ = (p, q) => [p.name, p.description, p.category, p.frequency, p.amount].join(' ').toLowerCase().includes(q.toLowerCase());
 const filterPlans = l => l.filter(p => (PS.cat === 'all' || p.category === PS.cat) && (PS.freq === 'all' || p.frequency === PS.freq) && BUD[PS.bud][1](p) && (!PS.q.trim() || matchQ(p, PS.q.trim()))).sort(SORT[PS.sort][1]);
 const opts = (o, v) => Object.entries(o).map(([k, x]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${Array.isArray(x) ? x[0] : x}</option>`).join('');
@@ -258,7 +296,7 @@ const planCard = (p, i, quick = '') => `<div onclick="openPlan(${i})" class="cur
   <div class="flex items-center justify-between"><span class="text-xs font-medium uppercase tracking-wide text-slate-500">${p.category} · ${p.frequency}</span>${p.active === false ? badge('cancelled').replace('Cancelled', 'Hidden') : ''}</div>
   <h3 class="font-semibold text-slate-900 mt-2">${esc(p.name)}</h3>
   <p class="mt-3 text-2xl font-semibold text-slate-900">${naira(p.amount)}<span class="text-sm font-normal text-slate-500"> / ${FQ[p.frequency]}</span></p>
-  <dl class="mt-3 text-sm space-y-1"><div class="flex justify-between"><dt class="text-slate-500">Duration</dt><dd class="text-right">${monthsLabel(p)} · ${p.duration} payments</dd></div><div class="flex justify-between"><dt class="text-slate-500">Total payout</dt><dd class="font-medium">${naira(p.payout)}</dd></div></dl>
+  <dl class="mt-3 text-sm space-y-1"><div class="flex justify-between"><dt class="text-slate-500">Duration</dt><dd class="text-right">${monthsLabel(p)} · ${nPay(p)} payments</dd></div><div class="flex justify-between"><dt class="text-slate-500">Total payout</dt><dd class="font-medium">${naira(payoutOf(p))}</dd></div></dl>
   ${p.description ? `<p class="mt-3 text-xs text-slate-500 line-clamp-2">${esc(p.description)}</p>` : ''}
   <div class="mt-auto pt-4 flex gap-2" onclick="event.stopPropagation()">${quick}</div></div>`;
 
@@ -301,7 +339,7 @@ window.openPlan = i => {
     <div class="h-16 px-5 border-b flex items-center justify-between shrink-0"><div class="flex items-center gap-2"><button onclick="openPlan(${i - 1})" ${i ? '' : 'disabled'} class="${dBtn}" aria-label="Previous plan">‹</button><button onclick="openPlan(${i + 1})" ${i < L.length - 1 ? '' : 'disabled'} class="${dBtn}" aria-label="Next plan">›</button><span class="ml-1 text-sm text-slate-500">Plan ${i + 1} of ${L.length}</span></div><button onclick="closePlan()" class="${dBtn}" aria-label="Close">✕</button></div>
     <div class="flex-1 overflow-y-auto p-6"><p class="text-xs font-medium uppercase tracking-wide text-slate-500">${p.category} · ${p.frequency}</p><h2 class="text-xl font-semibold text-slate-900 mt-1">${esc(p.name)}</h2>
       <p class="mt-4 text-3xl font-semibold">${naira(p.amount)}<span class="text-base font-normal text-slate-500"> / ${FQ[p.frequency]}</span></p>
-      <dl class="mt-5 divide-y border-y">${row('Saving period', monthsLabel(p))}${row('Number of payments', p.duration)}${row('Total you contribute', naira(p.amount * p.duration))}${row('Total payout', naira(p.payout))}${row('Status', p.active === false ? 'Hidden' : 'Open for enrolment')}</dl>
+      <dl class="mt-5 divide-y border-y">${row('Saving period', monthsLabel(p))}${row('Number of payments', nPay(p))}${row('Total you contribute', naira(totalOf(p)))}${row('Total payout', naira(payoutOf(p)))}${row('Status', p.active === false ? 'Hidden' : 'Open for enrolment')}</dl>
       ${p.description ? `<h3 class="mt-6 text-sm font-semibold">What's included</h3><p class="mt-2 text-sm text-slate-600 leading-relaxed">${esc(p.description)}</p>` : ''}
       <div class="mt-8 flex gap-2">${nb(i - 1, '← Previous')}${nb(i + 1, 'Next →')}</div></div>
     <div class="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t shrink-0">${(window.PLAN_ACTION || (() => ''))(p)}</div></aside>`;
@@ -309,7 +347,7 @@ window.openPlan = i => {
 };
 
 // ===== app shell: sidebar, top bar with global plan search, keyboard shortcuts =====
-function layout({ brand, nav, views, alias = {}, support = false, badges = null, live = [], onLive = null }) {
+function layout({ brand, nav, views, alias = {}, support = false, badges = null, live = [], onLive = null, chip = null }) {
   const u = pb.authStore.record, ini = (u.name || u.email || '?').trim()[0].toUpperCase();
   $('#app').innerHTML = `<div class="min-h-screen lg:flex">
   <div id="ov" class="fixed inset-0 bg-slate-900/40 z-30 hidden lg:hidden"></div>
@@ -323,7 +361,7 @@ function layout({ brand, nav, views, alias = {}, support = false, badges = null,
       <button id="mb" class="relative lg:hidden p-2 -ml-2 text-slate-600" aria-label="Menu">${ic(IC.menu)}<span id="mbd" class="hidden absolute top-1.5 right-1 w-2.5 h-2.5 rounded-full bg-red-600"></span></button>
       <span id="ttl" class="hidden md:block text-sm font-medium text-slate-900 w-44 shrink-0"></span>
       <div class="relative flex-1 max-w-md"><span class="absolute left-3 top-2.5 text-slate-400">${ic(IC.search)}</span><input id="gs" autocomplete="off" placeholder="Jump to a plan…  ( / )" class="${inp} pl-10 bg-slate-50"><div id="gr" class="hidden absolute left-0 right-0 top-11 bg-white border rounded-xl shadow-lg overflow-hidden divide-y"></div></div>
-      <div class="ml-auto flex items-center gap-3"><button id="tg" onclick="toggleTheme()" class="p-2 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Switch between light and dark mode" title="Light / dark mode">${ic(document.documentElement.classList.contains('dark') ? IC.sun : IC.moon)}</button><div class="hidden sm:block text-right leading-tight"><p class="text-sm font-medium text-slate-900">${esc(u.name || u.email)}</p><p class="text-xs text-slate-500">${u.role === 'admin' ? 'Administrator' : 'Member'}</p></div><div class="w-9 h-9 rounded-full bg-emerald-800 text-white grid place-items-center text-sm font-semibold">${esc(ini)}</div></div>
+      <div class="ml-auto flex items-center gap-3">${chip ? '<a href="#wallet" id="wchip" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-white text-sm font-medium text-slate-700 hover:bg-slate-50" title="Your wallet"><span class="text-slate-500">Wallet</span><span id="wbal">…</span></a>' : ''}<button id="tg" onclick="toggleTheme()" class="p-2 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Switch between light and dark mode" title="Light / dark mode">${ic(document.documentElement.classList.contains('dark') ? IC.sun : IC.moon)}</button><div class="hidden sm:block text-right leading-tight"><p class="text-sm font-medium text-slate-900">${esc(u.name || u.email)}</p><p class="text-xs text-slate-500">${u.role === 'admin' ? 'Administrator' : 'Member'}</p></div><div class="w-9 h-9 rounded-full bg-emerald-800 text-white grid place-items-center text-sm font-semibold">${esc(ini)}</div></div>
     </header>
     <main id="main" class="p-4 pb-28 sm:p-8 sm:pb-10 max-w-6xl mx-auto"></main>
   </div></div>${support ? `<a href="${waLink()}" target="_blank" rel="noopener" aria-label="Customer support on WhatsApp" title="Customer support" class="fixed right-4 sm:right-6 bottom-[max(1rem,env(safe-area-inset-bottom))] sm:bottom-6 z-[25] h-14 w-14 sm:w-auto sm:px-5 rounded-full bg-[#25D366] text-white shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition flex items-center justify-center gap-2">${waIcon('w-7 h-7')}<span class="hidden sm:inline text-sm font-semibold">Customer support</span></a>` : ''}`;
@@ -362,8 +400,9 @@ function layout({ brand, nav, views, alias = {}, support = false, badges = null,
     if (!$('#ov').classList.contains('hidden')) tog();
     const m = $('#main'); if (!same) m.innerHTML = '<p class="text-sm text-slate-400">Loading…</p>';
     try { await views[v](m, new URLSearchParams(qs)); if (same) scrollTo(0, y); } catch (e) { m.innerHTML = `<p class="text-red-600 text-sm">${esc(e.message)}</p>`; }
-    updBadges();
+    updBadges(); updChip();
   };
+  const updChip = async () => { if (!chip) return; try { const t = await chip(); const el = $('#wbal'); if (el) el.textContent = t; } catch (e) { /* the balance chip is a convenience */ } };
 
   // red counters beside navigation links (e.g. pending payments) + a dot on the phone menu button + a count in the tab title
   const updBadges = async () => {
@@ -381,7 +420,7 @@ function layout({ brand, nav, views, alias = {}, support = false, badges = null,
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|number|tel|email|password|url)$/.test(a.type))); };
   const busyUI = () => $('[data-ui]') || $('#dr') || typing();
   const kick = () => { clearTimeout(lt); lt = setTimeout(function run() { if (busyUI()) { lt = setTimeout(run, 2000); return; } refresh(); }, 500); };
-  live.forEach(c => { const p = pb.collection(c).subscribe?.('*', e => { try { onLive?.(c, e); } catch (x) { } clearTimeout(bt); bt = setTimeout(updBadges, 300); kick(); }); p?.catch?.(() => { }); });
+  live.forEach(c => { const p = pb.collection(c).subscribe?.('*', e => { try { onLive?.(c, e); } catch (x) { } clearTimeout(bt); bt = setTimeout(() => { updBadges(); updChip(); }, 300); kick(); }); p?.catch?.(() => { }); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });   // catch up after the tab slept
   setInterval(() => { if (!document.hidden) kick(); }, 90000);                              // safety net if a network blocks the live connection
 
@@ -400,7 +439,7 @@ const ulink = x => x ? `<a href="#user?id=${x.id}" class="font-medium text-emera
 const txFrom = (r, kind) => {
   const pay = kind === 'payment', pl = r.expand?.subscription?.expand?.plan || {};
   return { key: kind + ':' + r.id, kind, id: r.id, created: r.created, at: parseTs(r.created), status: r.status, plan: pl.name || '—', frequency: pl.frequency || '',
-    amount: pay ? r.amount : (pl.payout || 0), penalty: pay ? (r.penalty || 0) : 0, late: pay ? (r.late_count || 0) : 0,
+    amount: pay ? r.amount : (payoutOf(pl) || 0), penalty: pay ? (r.penalty || 0) : 0, late: pay ? (r.late_count || 0) : 0,
     covers: pay && pl.frequency ? plural(instOf(r, pl), pl.frequency) : '', note: r.note || '', ref: r.tx_ref || '', user: r.expand?.user || null };
 };
 const invNo = t => (t.kind === 'payment' ? 'INV' : 'PAYOUT') + '-' + lagosDay(t.created).replace(/-/g, '') + '-' + String(t.id).slice(-5).toUpperCase();

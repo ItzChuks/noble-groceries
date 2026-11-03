@@ -60,15 +60,17 @@ Browser code can be edited by anyone, so the rules that matter are checked on th
 - **Delete several plans**: Admin > Plans has a checkbox on every plan and a *Select all* box (it selects the plans currently shown by the search/filters). A bar appears at the bottom with *Delete selected*. A plan that members have joined cannot be deleted (PocketBase protects it); it is skipped and reported, so hide it instead.
 - **Demo mode** (`USE_MOCK = true`) emulates real time too, for actions in the same tab.
 
-## Flutterwave payments
+## Wallet and payments
 
-"Make payment" now opens Flutterwave's secure checkout and the payment is confirmed automatically (no admin step). No keys live in the website: they are set on the backend (see the backend README, section "Flutterwave payments"). In demo mode (`USE_MOCK = true`) payments are confirmed instantly. Admins no longer confirm Flutterwave payments; Confirm/Reject only appears on a payment flagged `REVIEW` (amount mismatch).
+Members fund a **wallet** by transferring money to their own fixed virtual account number (Dashboard > Wallet); it is credited in real time and plans take their contributions from it automatically. No keys live in the website: they are set on the backend (see the backend README, section "Wallet, virtual accounts and automatic payments"). In demo mode (`USE_MOCK = true`) the Wallet page has a "simulate a transfer" button. Admins can see every wallet movement under Admin > Wallet and credit a member by hand (Admin > Users > member) if a webhook is missed.
+
+Cash and Foodie plans run on a fixed season, **1 January to 30 November**; a member who joins part-way pays the contributions already due (with the joining fee, from the wallet). Grocery plans run from the day of joining.
 
 ## Fees, registration and terms
 
 - **T-shirt fee (₦5,000, one time)**: members can use the whole dashboard, join plans and pay contributions without it. It is only required when they request a payout: the *Request payout* button first asks for this fee (once only), then the clearance fee. Admin > Users shows *Registered* and *Unregistered* members (with filter tabs) and can mark someone registered or unregistered by hand (for example after an offline payment).
-- **Joining fee (₦3,000)**: paid each time a member joins a plan; the plan is joined automatically once Flutterwave confirms it.
-- **Payout clearance fee (₦3,000)**: paid with every payout request; the request is sent automatically once confirmed.
+- **Registration / joining fee (₦3,000)**: taken from the wallet each time a member joins a plan (plus the catch-up on a mid-season Cash/Foodie plan).
+- **Payout clearance fee (₦3,000)**: taken from the wallet with every payout request; the request is sent automatically.
 - **Another plan must be running**: a payout can be requested from a plan only if the member has *another* plan that is active and whose saving period has not ended. Otherwise the button is disabled with a "Join a plan" hint, and the server refuses it too (`runningElsewhere` in `pb_hooks/fees.js`).
 - All fees appear under Admin > Fees and, for members, under *Fees paid*. Amounts: `FEES` at the top of `app.js` (display) and `pb_hooks/fees.js` on the backend (charged). Keep both in sync.
 - **Terms and Conditions**: `terms.html` (text lives in `termsHTML()` in `app.js`). Sign-up requires ticking the acceptance box; the server rejects sign-ups without it and stores `terms_accepted_at`.
