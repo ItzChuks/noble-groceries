@@ -2,7 +2,7 @@
 function createMockPB() {
   const mem = {};
   const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return mem[k] ?? null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) { mem[k] = v; } }, del: k => { try { localStorage.removeItem(k); } catch (e) { delete mem[k]; } } };
-  const KEY = 'noble_db_v2', REL = { user: 'users', plan: 'plans', subscription: 'subscriptions' };
+  const KEY = 'noble_db_v4', REL = { user: 'users', plan: 'plans', subscription: 'subscriptions', code_used_by: 'users' };
   let db = JSON.parse(ls.get(KEY) || 'null');
   const save = () => ls.set(KEY, JSON.stringify(db));
   // real-time emulation: listeners per collection; other open tabs are told through a BroadcastChannel
@@ -10,30 +10,43 @@ function createMockPB() {
   const fire = (c, action, record) => (L[c] || []).forEach(cb => setTimeout(() => cb({ action, record }), 0));
   const emit = (c, action, record) => { fire(c, action, record); if (bc) bc.postMessage({ c, action, record }); };
   if (bc) bc.onmessage = e => { db = JSON.parse(ls.get(KEY) || 'null') || db; fire(e.data.c, e.data.action, e.data.record); };
+  // plan codes: grocery plans only, on the dates set on the plan (demo copy of pb_hooks/rules.js planCodeWindow)
+  function giveCode(s, pl, custom) {
+    if (!pl || pl.category !== 'grocery') return;
+    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r4 = () => Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join('');
+    const day = v => { const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]) - 36e5) : null; };
+    const w = custom || { from: day(pl.code_open_day), last: day(pl.code_close_day) };
+    s.code = s.code || 'NG-' + r4() + '-' + r4(); s.code_custom = !!custom;
+    s.code_from = w.from ? w.from.toISOString().replace('T', ' ') : '2999-01-01 00:00:00.000Z';
+    s.code_until = w.from && w.last ? new Date(w.last.getTime() + 864e5).toISOString().replace('T', ' ') : w.from ? '2999-12-31 00:00:00.000Z' : '2999-12-31 00:00:00.000Z';
+  }
+  const mToL = d => new Date(d.getTime() + 36e5), mFromL = (y, m, d, h = 0) => new Date(Date.UTC(y, m, d, h) - 36e5), mTs = x => new Date(String(x).replace(' ', 'T') + (/Z$/.test(String(x)) ? '' : 'Z'));   // Lagos date helpers (app.js loads later)
   const uid = () => Math.random().toString(36).slice(2, 12).padEnd(10, '0');
   const now = (age = 0) => new Date(Date.now() - age * 864e5).toISOString().replace('T', ' ').slice(0, 19);
   const add = (c, o, age = 0) => { const r = { id: uid(), created: now(age), ...o }; db[c].push(r); return r; };
   if (!db) {
-    db = { users: [], plans: [], subscriptions: [], payments: [], payouts: [], fees: [], wallet_txs: [] };
+    db = { users: [], plans: [], subscriptions: [], payments: [], payouts: [], fees: [], wallet_txs: [], deposits: [] };
     add('users', { email: 'admin@noble.com', password: 'admin12345', name: 'Noble Admin', country: 'Nigeria', phone: '08026701578', role: 'admin', shirt_paid: true }, 60);
     const u = add('users', { email: 'user@noble.com', password: 'user12345', name: 'Ada Okafor', country: 'Nigeria', phone: '08012345678', role: 'user', shirt_paid: true }, 40);
     add('users', { email: 'chidi@example.com', password: 'pass12345', name: 'Chidi Eze', country: 'Ghana', phone: '0244000111', role: 'user', shirt_paid: false }, 15);
-    const n = a => '₦' + a.toLocaleString();
-    [['Grocery Plan 1', 250, ' 50kg Rice, 5L Groundnut Oil, 1 Carton of Indomitable'], ['Grocery Plan 2', 500, '2 Bags of 50kg Rice, 10kg Semo, 5L Groundnut Oil, 1 Carton of Indomitable, 2 Packets of Knorr Cubes'], ['Grocery Plan 3', 800, '3 Bags of 50kg Rice, 5L Groundnut Oil, 3 Cartons of Indomitable, 2 Cartons of Spaghetti, 2 Packets of Knorr Cubes'], ['Grocery Plan 4', 1000, '4 Bags of 50kg Rice, 10kg Groundnut Oil, 10kg Semo, 4 Cartons of Indomitable, 1 Carton of Spaghetti']]
-      .forEach(([name, a, d]) => add('plans', { name, category: 'grocery', frequency: 'daily', amount: a, duration: 365, payout: a * 365, description: d.trim(), active: true }, 50));
-    [['daily', 365, [100, 200, 300, 400, 500, 1000, 1500, 2000, 2500, 3000]], ['weekly', 53, [500, 1000, 1500, 2000, 2500, 3000]], ['monthly', 12, [2000, 2500, 3000, 5000, 10000, 15000, 20000]]]
-      .forEach(([f, d, l]) => l.forEach(a => add('plans', { name: f[0].toUpperCase() + f.slice(1) + ' Savings ' + n(a), category: 'cash', frequency: f, amount: a, duration: d, payout: a * d, description: '', active: true }, 50)));
-    const pl = nm => db.plans.find(p => p.name === nm).id;
-    const s1 = add('subscriptions', { user: u.id, plan: pl('Daily Savings ₦500'), status: 'active' }, 11);
-    const s2 = add('subscriptions', { user: u.id, plan: pl('Grocery Plan 2'), status: 'active' }, 3);
-    // s1: 12 instalments covered; payment #10 was made after the deadline, so it carries a ₦500 penalty
-    for (let i = 0; i < 12; i++) { const late = i === 10; add('payments', { user: u.id, subscription: s1.id, amount: late ? 1000 : 500, penalty: late ? 500 : 0, installments: 1, late_count: late ? 1 : 0, note: 'TRF' + (1000 + i), status: i < 10 ? 'confirmed' : 'pending' }, 11 - i); }
-    for (let i = 0; i < 4; i++) add('payments', { user: u.id, subscription: s2.id, amount: 500, penalty: 0, installments: 1, late_count: 0, note: 'TRF' + (2000 + i), status: 'confirmed' }, 3 - i);
+    const ymd = k => { const L = mToL(new Date()); return new Date(Date.UTC(L.getUTCFullYear(), L.getUTCMonth(), L.getUTCDate() + k)).toISOString().slice(0, 10); };
+    // grocery plans (with plan codes, on dates picked by the admin), cash and foodie plans (fixed 1 Jan - 30 Nov season)
+    [[4, 2000], [8, 2000], [12, 1500]].forEach(([w, a]) => add('plans', { name: 'Grocery ' + w + ' weeks', category: 'grocery', frequency: 'weekly', amount: a, months: Math.max(1, Math.round(w / 4.345)), duration: w, payout: a * w, payout_after_days: Math.round(w * 7.5), description: 'Rice, oil, semo and noodles', code_open_day: ymd(-3), code_close_day: ymd(10), active: true }, 50));
+    add('plans', { name: 'Grocery Plan 1', category: 'grocery', frequency: 'daily', amount: 250, months: 1, duration: 30, payout: 7500, payout_after_days: 32, description: '50kg Rice, 5L Groundnut Oil, 1 Carton of Indomitable', code_open_day: '', code_close_day: '', active: true }, 50);
+    add('plans', { name: 'Grocery monthly 3 months', category: 'grocery', frequency: 'monthly', amount: 10000, months: 3, duration: 3, payout: 30000, payout_after_days: 92, description: '', code_open_day: ymd(-1), code_close_day: ymd(30), active: true }, 50);
+    [['daily', [500, 1000]], ['weekly', [2000]], ['monthly', [10000]]].forEach(([f, l]) => l.forEach(a => add('plans', { name: f[0].toUpperCase() + f.slice(1) + ' Savings ₦' + a.toLocaleString(), category: 'cash', frequency: f, amount: a, months: 11, duration: f === 'daily' ? 334 : f === 'weekly' ? 48 : 11, payout: 0, description: '', active: true }, 50)));
+    add('plans', { name: 'Foodie weekly ₦1,500', category: 'foodie', frequency: 'weekly', amount: 1500, months: 11, duration: 48, payout: 0, description: 'Festive food basket', active: true }, 50);
+    const pl = nm => db.plans.find(p => p.name === nm);
+    const mk = (p, age) => { const s = add('subscriptions', { user: u.id, plan: p.id, status: 'active' }, age); giveCode(s, p); s.code = 'NG-DEMO-' + String(age).padStart(4, '0').slice(-4); return s; };
+    const s1 = mk(pl('Grocery 8 weeks'), 20), s2 = mk(pl('Grocery Plan 1'), 4);
+    for (let i = 0; i < 3; i++) add('payments', { user: u.id, subscription: s1.id, amount: 2000, penalty: 0, installments: 1, late_count: 0, note: 'Wallet', status: 'confirmed' }, 20 - i * 7);
+    for (let i = 0; i < 4; i++) add('payments', { user: u.id, subscription: s2.id, amount: 250, penalty: 0, installments: 1, late_count: 0, note: 'Wallet', status: 'confirmed' }, 4 - i);
     save();
   }
+  if (!db.deposits) { db.deposits = []; save(); }
   if (!db.fees) { db.fees = []; db.users.forEach(u => { if (u.shirt_paid === undefined) u.shirt_paid = true; }); save(); }   // demo data saved before fees existed
   if (!db.wallet_txs) { db.wallet_txs = []; db.users.forEach(u => { if (u.wallet_balance === undefined) u.wallet_balance = u.email === 'user@noble.com' ? 20000 : 0; }); save(); }   // demo data saved before wallets existed
-  const test = (r, f) => !f || f.split('&&').every(c => { const m = c.trim().match(/^(\w+)\s*=\s*(?:"([^"]*)"|(true|false))$/); if (!m) return true; return r[m[1]] === (m[2] !== undefined ? m[2] : m[3] === 'true'); });
+  const test = (r, f) => !f || f.split('&&').every(c => { const m = c.trim().match(/^(\w+)\s*=\s*(?:"([^"]*)"|(true|false))$/); if (!m) return true; return m[2] !== undefined ? (r[m[1]] ?? '') === m[2] : !!r[m[1]] === (m[3] === 'true'); });
   const sortBy = (l, s) => { const k = (s || '-created').split(','); return [...l].sort((a, b) => { for (let x of k) { x = x.trim(); const d = x[0] === '-', f = d ? x.slice(1) : x; if (a[f] < b[f]) return d ? 1 : -1; if (a[f] > b[f]) return d ? -1 : 1; } return 0; }); };
   const expand = (r, paths) => { if (!paths) return r; const o = { ...r, expand: {} }; paths.split(',').forEach(p => { const [f, ...rest] = p.trim().split('.'); const x = db[REL[f]].find(z => z.id === r[f]); if (x) o.expand[f] = rest.length ? expand(x, rest.join('.')) : x; }); return o; };
   let aid = null; try { const a = JSON.parse(ls.get('pocketbase_auth') || 'null'); aid = a && a.model && a.model.id; } catch (e) {}
@@ -41,14 +54,17 @@ function createMockPB() {
   const list = (c, o = {}) => sortBy(db[c].filter(r => test(r, o.filter)), o.sort).map(r => expand(r, o.expand));
   const col = c => ({
     async getFullList(o) { return list(c, o); },
+    async getFirstListItem(f, o = {}) { const r = list(c, { ...o, filter: f })[0]; if (!r) { const e = new Error("The requested resource wasn't found."); e.status = 404; throw e; } return r; },
     async getList(p, n, o) { const l = list(c, o); return { items: l.slice((p - 1) * n, p * n), totalItems: l.length, page: p, perPage: n }; },
-    async getOne(id) { const r = db[c].find(x => x.id === id); if (!r) throw new Error('Record not found.'); return r; },
+    async getOne(id, o = {}) { const r = db[c].find(x => x.id === id); if (!r) throw new Error('Record not found.'); return expand(r, o.expand); },
     async create(d) {
       d = { ...d }; delete d.passwordConfirm;
       if (c === 'users') { if (db.users.some(u => u.email === d.email)) throw new Error('That email is already registered.'); if (!d.terms_accepted) throw new Error('You must accept the Terms and Conditions to create an account.'); d.role = 'user'; d.shirt_paid = false; d.terms_accepted_at = now(); }
       const r = { id: uid(), created: now(), ...d }; db[c].push(r); save(); emit(c, 'create', r); return r;
     },
-    async update(id, d) { const r = db[c].find(x => x.id === id); if (!r) throw new Error('Record not found.'); Object.assign(r, d); save(); emit(c, 'update', r); return r; },
+    async update(id, d) { const r = db[c].find(x => x.id === id); if (!r) throw new Error('Record not found.'); Object.assign(r, d);
+      if (c === 'plans' && r.category === 'grocery') db.subscriptions.filter(x => x.plan === r.id && x.code && !x.code_used_at && !x.code_admin && !x.code_custom).forEach(x => { giveCode(x, r); emit('subscriptions', 'update', x); });
+      save(); emit(c, 'update', r); return r; },
     async delete(id) {
       const r = db[c].find(x => x.id === id);
       if (c === 'plans' && db.subscriptions.some(x => x.plan === id)) throw new Error('Failed to delete record. Make sure that the record is not part of a required relation reference.');
@@ -57,15 +73,22 @@ function createMockPB() {
     async subscribe(topic, cb) { (L[c] = L[c] || []).push(cb); return () => { L[c] = (L[c] || []).filter(x => x !== cb); }; },
     async unsubscribe() { L[c] = []; },
     async authRefresh() { return { record: authStore.model }; },
+    // demo: no email is sent; the reset link is printed in the browser console instead
+    async requestPasswordReset(e) { const u = db.users.find(x => x.email === e); if (u) { u._reset = uid(); save(); console.log('[demo] reset link: ' + location.origin + location.pathname + '?reset=' + u._reset); } return true; },
+    async confirmPasswordReset(t, p, p2) {
+      const u = db.users.find(x => x._reset && x._reset === t); if (!u) { const er = new Error('Invalid or expired token.'); er.status = 400; er.response = { data: { token: { message: 'Invalid or expired token.' } } }; throw er; }
+      if (p !== p2) throw new Error('Passwords do not match.'); u.password = p; delete u._reset; save(); return true;
+    },
     async authWithPassword(e, p) {
       const u = db.users.find(x => x.email === e && x.password === p); if (!u) throw new Error('Invalid email or password.');
+      if (u.suspended && u.role !== 'admin') throw new Error('Your account has been suspended: ' + (u.suspended_reason || '').replace(/[.!?\s]*$/, '') + '. Please contact customer care.');
       aid = u.id; ls.set('pocketbase_auth', JSON.stringify({ token: 'mock', model: { id: u.id, role: u.role } })); return { record: u };
     }
   });
   // ---- demo stand-in for the server's wallet routes (the real logic lives in pb_hooks/wallet.js) ----
   const post = (uidv, amount, kind, note, extra = {}) => {
     const u = db.users.find(x => x.id === uidv), bal = (u.wallet_balance || 0) + amount;
-    if (bal < 0) throw new Error('Not enough money in your wallet.');
+    if (amount < 0 && bal < 0 && !extra.allowNegative) throw new Error('Not enough money in your wallet.'); delete extra.allowNegative;
     u.wallet_balance = bal; emit('users', 'update', u);
     const t = { id: uid(), created: now(), user: uidv, type: amount >= 0 ? 'credit' : 'debit', amount: Math.abs(amount), balance: bal, kind, note: note || '', ...extra };
     db.wallet_txs.push(t); emit('wallet_txs', 'create', t); return bal;
@@ -76,7 +99,7 @@ function createMockPB() {
       let best = null, bd = null;
       items.forEach(i => { if (i.blocked) return; const st = planState(i.sub, i.pl, db.payments.filter(p => p.subscription === i.sub.id), t); if (!st.left || collectAt(i.sub, i.pl, st.paid) > t) return; if (!best || st.next < bd) { best = i; bd = st.next; } });
       if (!best) break;
-      const st = planState(best.sub, best.pl, db.payments.filter(p => p.subscription === best.sub.id), t), cost = st.cost(0), late = st.overdue > 0;
+      const st = planState(best.sub, best.pl, db.payments.filter(p => p.subscription === best.sub.id), t), cost = st.cost(0), late = cost > st.A;   // overdue but penalty-free (imported plan) counts as on time
       if ((db.users.find(x => x.id === uidv).wallet_balance || 0) < cost) { best.blocked = true; continue; }
       const p = { id: uid(), created: now(), user: uidv, subscription: best.sub.id, amount: cost, penalty: late ? st.pen : 0, installments: 1, late_count: late ? 1 : 0, note: 'Wallet' + (late ? ' · late' : ''), status: 'confirmed' };
       db.payments.push(p); emit('payments', 'create', p);
@@ -84,48 +107,229 @@ function createMockPB() {
     }
     save();
   };
+  // ---- plan codes (demo copy of pb_hooks/wallet.js codeState) ----
+  const norm = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(NG)?([A-Z0-9]{4})([A-Z0-9]{4})$/, 'NG-$2-$3');
+  const codeState = c => {
+    c = norm(c); const r = db.subscriptions.find(x => x.code === c), t = Date.now();
+    if (!r) return { status: 'invalid', code: c, message: 'That code does not exist. Check it and try again.' };
+    const pl = db.plans.find(p => p.id === r.plan) || {}, last = new Date(parseTs(r.code_until).getTime() - 1).toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', year: 'numeric' });
+    if (r.code_used_at || r.code_admin === 'used') return { status: 'used', code: c, plan: pl.name, rec: r, message: 'This code has already been used.' };
+    if (r.code_admin === 'expired') return { status: 'expired', code: c, plan: pl.name, rec: r, message: 'This code has expired.' };
+    if (t >= parseTs(r.code_until).getTime()) return { status: 'expired', code: c, plan: pl.name, rec: r, message: 'This code expired at the end of ' + last + '.' };
+    if (String(r.code_from || '').slice(0, 4) >= '2999') return { status: 'not_yet', code: c, plan: pl.name, rec: r, message: 'This code is not open yet. Its opening date has not been announced.' };
+    if (t < parseTs(r.code_from).getTime()) return { status: 'not_yet', code: c, plan: pl.name, rec: r, message: 'This code can only be used from ' + new Date(parseTs(r.code_from)).toLocaleString('en-GB', { timeZone: 'Africa/Lagos' }) + '.' };
+    return { status: 'valid', code: c, plan: pl.name, rec: r, message: 'Code accepted. It can be used until the end of ' + last + '.' };
+  };
   const send = async (path, o = {}) => {
     const b = o.body || {};
     const me = db.users.find(u => u.id === aid), NEED = 'Please pay the one-time ₦5,000 t-shirt fee before you request a payout.', n = x => '₦' + Number(x).toLocaleString();
-    if (path.endsWith('/wallet/account')) {
-      if (!/^\d{11}$/.test(String(b.id_number || ''))) throw new Error('Enter your 11-digit ' + String(b.id_type || 'bvn').toUpperCase() + '.');
-      if (!me.va_number) { me.va_number = '9' + Math.floor(Math.random() * 1e9).toString().padStart(9, '0'); me.va_bank = 'Demo Bank'; me.va_ref = 'NOBLE-VA-' + me.id; save(); }
-      return { number: me.va_number, bank: me.va_bank };
+    if (path.endsWith('/admin/stats')) {                 // same totals the real server works out with SQL
+      const U = db.users, M = U.filter(u => u.role !== 'admin'), P = db.payments, sum = (l, f) => l.reduce((x, r) => x + (+r[f] || 0), 0), conf = P.filter(p => p.status === 'confirmed'), tops = (db.wallet_txs || []).filter(t => t.kind === 'topup');
+      const reg = M.filter(u => u.shirt_paid).length;
+      return { users: U.length, members: M.length, registered: reg, unregistered: M.length - reg, withAccount: 0, tax: sum((db.fees || []).filter(f => f.type === 'tax' && f.status === 'confirmed'), 'amount'), deposits: (db.deposits || []).filter(d => d.status === 'successful').length, depositTotal: sum((db.deposits || []).filter(d => d.status === 'successful'), 'amount'), pendingDeposits: 0, codesUsed: db.subscriptions.filter(x => x.code_used_at).length, codesOpen: db.subscriptions.filter(x => x.code && !x.code_used_at && Date.now() >= parseTs(x.code_from).getTime() && Date.now() < parseTs(x.code_until).getTime()).length, admins: U.length - M.length, held: sum(U, 'wallet_balance'), subscriptions: db.subscriptions.length, activeSubscriptions: db.subscriptions.filter(x => x.status === 'active').length, pendingPayments: P.filter(p => p.status === 'pending').length, confirmedTotal: sum(conf, 'amount'), penalties: sum(conf, 'penalty'), fees: sum((db.fees || []).filter(f => f.status === 'confirmed'), 'amount'), pendingPayouts: db.payouts.filter(p => p.status === 'pending').length, plans: db.plans.length, topups: tops.length, topupTotal: sum(tops, 'amount') };
     }
-    if (path.endsWith('/wallet/demo-topup')) {            // demo only: pretend a bank transfer arrived
-      post(aid, +b.amount, 'topup', 'Bank transfer (demo)', { ref: 'DEMO-' + uid() }); collect(aid); save(); return { ok: true };
+    if (path.endsWith('/wallet/deposit')) {               // demo: the deposit succeeds at once (the real site sends you to the member's payment partner)
+      const a = Math.round(+b.amount || 0); if (a < 100) throw new Error('The smallest deposit is ₦100.');
+      db.deposits = db.deposits || []; const d = { id: uid(), created: now(), user: aid, amount: a, fee: 100, total: a + 100, tx_ref: 'NOBLE-DEP-DEMO-' + uid(), status: 'successful', flw_id: 'DEMO' };
+      db.deposits.push(d); emit('deposits', 'create', d);
+      post(aid, a, 'topup', 'Online deposit (demo)', { ref: d.tx_ref });
+      const f = { id: uid(), created: now(), user: aid, type: 'tax', amount: 100, status: 'confirmed', note: 'Deposit charge' }; db.fees.push(f); emit('fees', 'create', f);
+      collect(aid); save(); return { demo: true, amount: a, fee: 100, total: a + 100 };
+    }
+    if (path.endsWith('/wallet/verify')) { const d = (db.deposits || []).find(x => x.tx_ref === b.tx_ref); return d ? { status: d.status, amount: d.amount, fee: d.fee, total: d.total } : { status: 'pending' }; }
+    if (path.includes('/code/referred')) {   // demo: progress of plans joined with plan codes
+      const ids = decodeURIComponent((path.split('ids=')[1] || '')).split(',').filter(Boolean), out = {};
+      ids.forEach(id => { const x = db.subscriptions.find(r => r.id === id), pl = x && db.plans.find(p => p.id === x.plan); if (!x || !pl) { out[id] = { gone: true }; return; }
+        const paid = db.payments.filter(p => p.subscription === id && p.status !== 'rejected').reduce((a, p) => a + (p.installments || 1), 0), total = pl.duration || pl.weeks || 1;
+        out[id] = { plan: pl.name, status: x.status, paid, total, overdue: 0, next: '' }; });
+      return out;
+    }
+    if (path.endsWith('/code/check')) { const r = codeState(b.code); return Object.assign({}, r, { rec: undefined, count: 1 }); }
+    // ---- bank transfers with a receipt (demo: every receipt "matches" and is credited at once; the real check is in pb_hooks/transfers.js) ----
+    db.settings = db.settings || { bank_name: 'GTBank (demo)', account_number: '0123456789', account_name: 'Nobles Groceries', transfer_note: '', auto_approve: true, auto_max: 200000, max_age_days: 2 };
+    db.deposits = db.deposits || [];
+    if (path.endsWith('/transfer/info')) return { ...db.settings, tax: 100, min: 100, auto: db.settings.auto_approve };
+    if (path.endsWith('/admin/settings')) { if (me.role !== 'admin') throw new Error('Admins only.'); if ((o.method || 'GET') === 'POST') { Object.assign(db.settings, b, { auto_max: +b.auto_max || 0, max_age_days: +b.max_age_days || 0 }); save(); } return { ...db.settings, ai: false }; }
+    if (path.endsWith('/api/noble/transfer')) {
+      const amount = Math.round(+b.get('amount') || 0), file = b.get('receipt');
+      if (amount < 100) throw new Error('The smallest deposit is ₦100.'); if (!file || !file.size) throw new Error('Upload your payment receipt.');
+      const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(file); });
+      const today = new Date(Date.now() + 36e5).toISOString().slice(0, 10), ref = 'DEMO' + uid().toUpperCase();
+      const d = { id: uid(), created: now(), user: aid, amount, fee: 100, total: amount + 100, tx_ref: 'NOBLE-TRF-' + ref, status: 'successful', verified: 'auto', gateway: 'transfer', sender_name: b.get('sender_name') || '', receipt: file.name, receipt_data: data, receipt_ref: ref, check_note: 'Receipt checked automatically.',
+        check: { read: true, ai: { is_receipt: true, status: 'successful', amount: amount + 100, date: today, beneficiary_account_number: db.settings.account_number, beneficiary_account_name: db.settings.account_name, reference: ref, sender_name: b.get('sender_name') || '', looks_edited: false }, checks: { receipt: true, edited: true, amount: true, account: true, date: true, unique: true }, reasons: [] } };
+      db.deposits.push(d); emit('deposits', 'create', d);
+      post(aid, amount, 'topup', 'Bank transfer (receipt checked automatically)', { ref: 'TRANSFER-' + d.id });
+      const f = { id: uid(), created: now(), user: aid, type: 'tax', amount: 100, status: 'confirmed', note: 'Deposit charge', tx_ref: d.tx_ref }; db.fees.push(f); emit('fees', 'create', f);
+      collect(aid); save(); return { status: 'successful', id: d.id, amount, message: 'Account credited with ' + n(amount) + '. Payment confirmation under review (demo).' };
+    }
+    if (path.endsWith('/admin/transfer')) {
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const d = db.deposits.find(x => x.id === b.id); if (!d) throw new Error('Deposit not found.'); const stamp = () => { d.reviewed_by = aid; d.reviewed_at = now(); };
+      const act = b.action === 'confirm' ? 'approve' : b.action === 'reverse' ? 'reject' : b.action;
+      if (act === 'approve') {
+        if (d.status === 'successful') { d.verified = 'admin'; d.check_note = b.note || 'Payment approved.'; stamp(); }                     // money stays
+        else { post(d.user, d.amount, 'topup', 'Bank transfer (approved by admin)', { ref: 'TRANSFER-' + d.id }); d.status = 'successful'; d.verified = 'admin'; d.check_note = b.note || 'Payment approved.'; stamp(); collect(d.user); }
+      } else if (act === 'reject') {
+        if (d.status === 'successful') { post(d.user, -d.amount, 'reversal', 'Deposit rejected, money withdrawn · ' + (b.note || ''), { allowNegative: true }); d.status = 'reversed'; }   // money withdrawn
+        else d.status = 'failed';
+        d.check_note = b.note || 'Payment not received.'; stamp();
+      }
+      emit('deposits', 'update', d); save(); return { status: d.status, balance: db.users.find(u => u.id === d.user).wallet_balance };
+    }
+    if (path.endsWith('/admin/reset-user')) {
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const u = db.users.find(x => x.id === b.user); if (!u) throw new Error('Member not found.'); if (!u.suspended) throw new Error('Suspend the account first.'); if (b.confirm !== 'RESET') throw new Error('Type RESET to confirm.');
+      const removed = {}; ['payments', 'payouts', 'fees', 'wallet_txs', 'deposits', 'subscriptions'].forEach(c => { const before = (db[c] || []).length; db[c] = (db[c] || []).filter(r => r.user !== u.id); removed[c] = before - db[c].length; });
+      u.wallet_balance = 0; if (b.clear_shirt) { u.shirt_paid = false; u.shirt_paid_at = ''; } emit('users', 'update', u); save(); return { ok: true, name: u.name || u.email, removed };
+    }
+    if (path.includes('/admin/delete-user')) {
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const C = ['payments', 'payouts', 'fees', 'wallet_txs', 'deposits', 'subscriptions'];
+      if ((o.method || 'GET') === 'GET') { const id = new URLSearchParams(path.split('?')[1] || '').get('user'); return Object.fromEntries(C.map(c => [c, (db[c] || []).filter(r => r.user === id).length])); }
+      const u = db.users.find(x => x.id === b.user); if (!u) throw new Error('Member not found.'); if (u.role === 'admin') throw new Error('An admin account cannot be deleted here.');
+      if (!u.suspended) throw new Error('Suspend the account first.'); if (b.confirm !== 'DELETE') throw new Error('Type DELETE to confirm.');
+      db.subscriptions.forEach(r => { if (r.code_used_by === u.id && r.user !== u.id) { r.code_used_by = ''; r.code_used_name = 'Deleted member'; } });
+      const removed = {}; C.forEach(c => { const before = (db[c] || []).length; db[c] = (db[c] || []).filter(r => r.user !== u.id); removed[c] = before - db[c].length; });
+      db.users = db.users.filter(x => x.id !== u.id); save(); return { ok: true, name: u.name || u.email, removed };
+    }
+    if (path.endsWith('/admin/suspend')) {
+      if (me.role !== 'admin') throw new Error('Admins only.'); const u = db.users.find(x => x.id === b.user);
+      if (u.role === 'admin') throw new Error('An admin account cannot be suspended.'); if (b.suspended && !b.reason) throw new Error('Give a reason.');
+      Object.assign(u, { suspended: !!b.suspended, suspended_reason: b.suspended ? b.reason : '', suspended_at: b.suspended ? now() : '' }); emit('users', 'update', u); save(); return { suspended: u.suspended };
+    }
+    if (path.endsWith('/admin/import-plan')) {
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const items = Array.isArray(b.items) ? b.items : [{ plan: b.plan, days: b.days, amount_paid: b.amount_paid, count: 1 }];
+      let added = 0; const ids = [], seenC = [], tgt = db.users.find(x => x.id === b.user) || {};
+      items.forEach((it, i) => {   // several plan codes per row: one plan each, the count goes up to match
+        const list = [...new Set([].concat(it.use_codes || [], it.use_code ? [it.use_code] : []).flatMap(x => String(x || '').split(/[\s,;]+/)).filter(Boolean).map(x => codeState(x).code))];
+        it._cs = list.map(c => { const r = codeState(c); if (r.status !== 'valid') throw new Error('Row ' + (i + 1) + ': ' + r.code + ': ' + r.message); if (seenC.includes(r.code)) throw new Error('Row ' + (i + 1) + ': ' + r.code + ' is used twice.'); seenC.push(r.code); return r; });
+        it.count = Math.max(Math.floor(+it.count || 1), it._cs.length); if (it.count > 50) throw new Error('Row ' + (i + 1) + ': at most 50 at a time.');
+      });
+      items.forEach((it, i) => {
+        const pl = db.plans.find(p => p.id === it.plan), days = Math.floor(+it.days || 0), paid = Math.round(+it.amount_paid || 0), k = paid / pl.amount;
+        if (!Number.isInteger(k) || k < 0) throw new Error('Row ' + (i + 1) + ': amount paid must be a multiple of the contribution, ' + n(pl.amount) + '.');
+        const L = new Date(Date.now() + 36e5), start = new Date(Date.UTC(L.getUTCFullYear(), L.getUTCMonth(), L.getUTCDate() - days, 8) - 36e5);
+        for (let c = 0; c < it.count; c++) {
+          const s = { id: uid(), created: start.toISOString().replace('T', ' '), user: b.user, plan: pl.id, status: 'active', imported: true, import_note: it.note || b.note || 'Brought over from manual records', no_penalty_before: b.charge_penalty ? '' : now() };
+          if (b.code_mode === 'custom') giveCode(s, pl, { from: new Date(Date.parse(b.code_from + 'T00:00:00Z') - 36e5), last: new Date(Date.parse(b.code_until + 'T00:00:00Z') - 36e5) });
+          else if (b.code_mode !== 'none') giveCode(s, pl);
+          if (it._cs[c]) { const x = it._cs[c]; s.joined_code = x.code; Object.assign(x.rec, { code_used_by: b.user, code_used_name: tgt.name || tgt.email, code_used_at: now(), code_used_sub: s.id }); emit('subscriptions', 'update', x.rec); }
+          db.subscriptions.push(s); emit('subscriptions', 'create', s); ids.push(s.id); added++;
+          if (k) { const p = { id: uid(), created: now(), user: b.user, subscription: s.id, amount: paid, penalty: 0, installments: k, late_count: 0, note: 'Brought over from manual records · ' + k + ' payments', status: 'confirmed' }; db.payments.push(p); emit('payments', 'create', p); }
+          if (b.charge_join_fee) post(b.user, -3000, 'join', 'Joining fee · ' + pl.name, { plan: pl.id, subscription: s.id });
+          if (b.charge_paid && paid) post(b.user, -paid, 'contribution', pl.name + ' · ' + k + ' payments added by admin', { plan: pl.id, subscription: s.id });
+        }
+      });
+      const before = db.payments.length; collect(b.user); save(); return { added, subscriptions: ids, subscription: ids[0], collected: db.payments.length - before };
+    }
+    if (path.endsWith('/admin/delete-plan')) {   // demo copy of deletePlans in pb_hooks/wallet.js
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const P = [].concat(b.plans || []), S = new Set();
+      db.subscriptions.filter(x => P.includes(x.plan) || (b.subscriptions || []).includes(x.id)).forEach(x => S.add(x.id));
+      const G = new Set(db.subscriptions.filter(x => S.has(x.id) && x.group_id).map(x => x.group_id)); db.subscriptions.filter(x => G.has(x.group_id)).forEach(x => S.add(x.id));
+      const hit = r => S.has(r.subscription) || (r.plan && P.includes(r.plan));
+      const pays = db.payments.filter(r => S.has(r.subscription)), pos = db.payouts.filter(r => S.has(r.subscription)), fs = db.fees.filter(hit), txs = db.wallet_txs.filter(hit);
+      const paidOut = new Set(pos.filter(p => p.status === 'confirmed').map(p => p.subscription)), net = {};
+      txs.forEach(t => { if (t.subscription && paidOut.has(t.subscription)) return; net[t.user] = (net[t.user] || 0) + (t.type === 'debit' ? 1 : -1) * t.amount; });
+      Object.keys(net).forEach(u => { if (net[u] <= 0) delete net[u]; });
+      const out = { plans: P.length, subscriptions: S.size, members: new Set(db.subscriptions.filter(x => S.has(x.id)).map(x => x.user)).size, payments: pays.length, payouts: pos.length, paid_out: paidOut.size, fees: fs.length, wallet_txs: txs.length, refundable: Object.values(net).reduce((a, c) => a + c, 0), refunded: 0 };
+      if (b.preview) return out; if (b.confirm !== 'DELETE') throw new Error('Type DELETE to confirm.');
+      const gone = (c, list) => { const ids = new Set(list.map(r => r.id)); db[c] = db[c].filter(r => !ids.has(r.id)); list.forEach(r => emit(c, 'delete', r)); };
+      gone('payments', pays); gone('payouts', pos); gone('fees', fs); gone('wallet_txs', txs); gone('subscriptions', db.subscriptions.filter(x => S.has(x.id))); gone('plans', db.plans.filter(p => P.includes(p.id)));
+      if (b.refund) Object.keys(net).forEach(u => { post(u, net[u], 'refund', 'Refund · plan deleted by admin'); out.refunded += net[u]; });
+      save(); return out;
+    }
+    if (path.endsWith('/admin/code-restore')) {   // demo: undo / redo of plan code changes
+      if (me.role !== 'admin') throw new Error('Admins only.'); const F = ['code_from', 'code_until', 'code_admin', 'code_admin_at', 'code_used_by', 'code_used_name', 'code_used_at', 'code_used_sub'];
+      (b.items || []).forEach(it => { const r = db.subscriptions.find(x => x.id === it.id); if (!r) return; F.forEach(f => { if (it[f] !== undefined) r[f] = it[f]; }); emit('subscriptions', 'update', r); }); save(); return { ok: true };
+    }
+    if (path.endsWith('/admin/code-status')) {
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const snapM = r => ({ id: r.id, code: r.code, code_from: r.code_from || '', code_until: r.code_until || '', code_admin: r.code_admin || '', code_admin_at: r.code_admin_at || '', code_used_by: r.code_used_by || '', code_used_name: r.code_used_name || '', code_used_at: r.code_used_at || '', code_used_sub: r.code_used_sub || '' });
+      if (Array.isArray(b.subscriptions) && b.status !== 'reopen') { const before = [], after = []; let skipped = 0;
+        b.subscriptions.forEach(id => { const r = db.subscriptions.find(x => x.id === id); if (!r || !r.code || r.code_used_at) { skipped++; return; } const s0 = snapM(r);
+          if (b.status === 'auto') { if (!r.code_admin) { skipped++; return; } r.code_admin = ''; r.code_admin_at = ''; } else if (b.status === 'open') { if (r.code_admin || parseTs(r.code_from) <= new Date()) { skipped++; return; } r.code_from = now(); r.code_custom = true; } else { r.code_admin = b.status; r.code_admin_at = now(); }
+          before.push(s0); after.push(snapM(r)); emit('subscriptions', 'update', r); });
+        save(); return { ok: true, changed: before.length, skipped, before, after }; }
+      if (Array.isArray(b.subscriptions)) { const until = new Date(Date.parse(b.until + 'T00:00:00Z') - 36e5 + 864e5); if (!(until > new Date())) throw new Error('The new last day must be today or later.'); let n = 0;
+        b.subscriptions.forEach(id => { const r = db.subscriptions.find(x => x.id === id); if (!r || !r.code) return; Object.assign(r, { code_used_by: '', code_used_name: '', code_used_at: '', code_used_sub: '', code_admin: '', code_admin_at: '', code_custom: true, code_until: until.toISOString().replace('T', ' ') }); if (!(parseTs(r.code_from) <= new Date())) r.code_from = now(); emit('subscriptions', 'update', r); n++; });
+        save(); return { ok: true, reopened: n }; }
+      const r = db.subscriptions.find(x => x.id === b.subscription); if (!r || !r.code) throw new Error('Plan code not found.');
+      if (b.status === 'reopen') { const until = new Date(Date.parse(b.until + 'T00:00:00Z') - 36e5 + 864e5); if (!(until > new Date())) throw new Error('The new last day must be today or later.');
+        Object.assign(r, { code_used_by: '', code_used_name: '', code_used_at: '', code_used_sub: '', code_admin: '', code_admin_at: '', code_custom: true, code_until: until.toISOString().replace('T', ' ') });
+        if (!(parseTs(r.code_from) <= new Date())) r.code_from = now(); emit('subscriptions', 'update', r); save(); return { ok: true, code: r.code, status: 'open' }; }
+      if (r.code_used_at) throw new Error('This code was used by ' + (r.code_used_name || 'a member') + ', so its status cannot be changed.');
+      if (b.status === 'open') { r.code_from = now(); r.code_custom = true; emit('subscriptions', 'update', r); save(); return { ok: true }; }
+      r.code_admin = b.status === 'auto' ? '' : b.status; r.code_admin_at = b.status === 'auto' ? '' : now(); emit('subscriptions', 'update', r); save(); return { ok: true };
+    }
+    // demo: every provider counts as set up; the draw goes to the provider with the fewest members
+    const GWS = ['flutterwave', 'paystack', 'monnify'], drawGw = () => { const c = Object.fromEntries(GWS.map(g => [g, db.users.filter(u => u.gateway === g).length])), min = Math.min(...GWS.map(g => c[g])), low = GWS.filter(g => c[g] === min); return low[Math.floor(Math.random() * low.length)]; };
+    if (path.endsWith('/admin/gateway')) {
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const u = db.users.find(x => x.id === b.user); if (!u) throw new Error('Member not found.');
+      u.gateway = b.gateway || drawGw(); u.gateway_manual = !!b.gateway; emit('users', 'update', u); save(); return { gateway: u.gateway, manual: u.gateway_manual };
+    }
+    if (path.endsWith('/admin/gateway/shuffle')) {
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const l = db.users.filter(u => u.role !== 'admin' && (b.mode === 'all' ? !u.gateway_manual : !GWS.includes(u.gateway)));
+      if (b.mode === 'all') l.forEach(u => u.gateway = '');
+      let changed = 0; l.sort(() => Math.random() - .5).forEach(u => { const g = drawGw(); if (u.gateway !== g) changed++; u.gateway = g; u.gateway_manual = false; emit('users', 'update', u); });
+      save(); return { changed, total: l.length };
+    }
+    if (path.endsWith('/wallet/deduct')) {
+      if (me.role !== 'admin') throw new Error('Admins only.');
+      const u = db.users.find(x => x.id === b.user), amt = +b.amount; if (!(amt > 0)) throw new Error('Enter an amount.'); if (!b.note) throw new Error('Give a reason.');
+      if (amt > (u.wallet_balance || 0)) throw new Error('The wallet only has ' + n(u.wallet_balance || 0) + '.');
+      const bal = post(b.user, -amt, 'deduction', 'Deducted by admin · ' + b.note); save(); return { ok: true, balance: bal };
     }
     if (path.endsWith('/wallet/credit')) {
       if (me.role !== 'admin') throw new Error('Admins only.');
-      post(b.user, +b.amount, 'topup', 'Credited by admin · ' + b.ref, { ref: 'MANUAL-' + b.ref }); collect(b.user); save(); return { ok: true };
+      post(b.user, +b.amount, 'topup', ['Credited by admin', b.ref && 'ref ' + b.ref, b.note].filter(Boolean).join(' · '), { ref: 'MANUAL-' + uid() }); collect(b.user); save(); return { ok: true, balance: db.users.find(x => x.id === b.user).wallet_balance };
     }
     if (path.endsWith('/fee/pay')) {
-      const t = b.type, amt = { shirt: 5000, join: 3000, clearance: 3000 }[t];
+      const t = b.type, amt = { shirt: 5000, join: 3000, clearance: 3000 }[t]; db.deposits = db.deposits || [];
       if (!amt) throw new Error('Unknown fee.');
       const short = need => { const bal = me.wallet_balance || 0; if (bal < need) throw new Error('Your wallet needs ' + n(need) + ' for this. You have ' + n(bal) + '. Please top up ' + n(need - bal) + '.'); };
       let out = {};
       if (t === 'shirt') { if (me.shirt_paid) throw new Error('You have already paid the t-shirt fee.'); short(amt); post(aid, -amt, 'shirt', 'T-shirt registration fee'); me.shirt_paid = true; me.shirt_paid_at = now(); emit('users', 'update', me); }
       else if (t === 'join') {
         const pl = db.plans.find(p => p.id === b.plan); if (!pl || pl.active === false) throw new Error('That plan is not open for enrolment.');
-        const s = { id: uid(), created: now(), user: aid, plan: pl.id, status: 'active' }, c = catchupCount(s, pl), total = amt + c * pl.amount;
-        short(total);
-        db.subscriptions.push(s); emit('subscriptions', 'create', s);
-        post(aid, -amt, 'join', 'Joining fee · ' + pl.name, { plan: pl.id, subscription: s.id });
-        if (c) { const p = { id: uid(), created: now(), user: aid, subscription: s.id, amount: c * pl.amount, penalty: 0, installments: c, late_count: 0, note: 'Catch-up · ' + c + ' instalments', status: 'confirmed' }; db.payments.push(p); emit('payments', 'create', p); post(aid, -c * pl.amount, 'catchup', 'Catch-up · ' + pl.name, { plan: pl.id, subscription: s.id }); }
-        out = { subscription: s.id, catchup: c * pl.amount, instalments: c }; collect(aid);
+        const L = [...new Set([b.code, ...(b.codes || [])].filter(x => String(x || '').trim()).map(norm))];
+        if (L.length && pl.category !== 'grocery') throw new Error('Plan codes can only be used to join grocery plans.');
+        const CS = L.map(k => { const x = codeState(k); if (x.status !== 'valid') throw new Error(k + ': ' + x.message); return x; });
+        const q = Math.max(Math.floor(+b.qty || 1), CS.length); if (!(q >= 1 && q <= 50)) throw new Error('You can join a plan 1 to 50 times at once.');
+        const c = catchupCount({ created: now() }, pl), each = amt + c * pl.amount + (isSeasonal(pl) ? 0 : pl.amount);   // fee + first payment
+        short(each * q);
+        const joinedWith = CS.map(x => x.code);
+        const gid = q > 1 ? uid() : '', ids = [];
+        for (let i = 0; i < q; i++) {
+          const s = { id: uid(), created: now(), user: aid, plan: pl.id, status: 'active', group_id: gid, group_lead: !!gid && i === 0, group_size: gid && i === 0 ? q : 0 };
+          if (joinedWith[i]) s.joined_code = joinedWith[i]; giveCode(s, pl);
+          db.subscriptions.push(s); emit('subscriptions', 'create', s); ids.push(s.id);
+          post(aid, -amt, 'join', 'Joining fee · ' + pl.name, { plan: pl.id, subscription: s.id });
+          const f = { id: uid(), created: now(), user: aid, type: 'join', amount: amt, status: 'confirmed', plan: pl.id, subscription: s.id, note: 'Wallet' }; db.fees.push(f); emit('fees', 'create', f);
+          if (c) { const p = { id: uid(), created: now(), user: aid, subscription: s.id, amount: c * pl.amount, penalty: 0, installments: c, late_count: 0, note: 'Catch-up · ' + c + ' instalments', status: 'confirmed' }; db.payments.push(p); emit('payments', 'create', p); post(aid, -c * pl.amount, 'catchup', 'Catch-up · ' + pl.name, { plan: pl.id, subscription: s.id }); }
+        }
+        CS.forEach((x, k) => { Object.assign(x.rec, { code_used_by: aid, code_used_name: me.name || me.email, code_used_at: now(), code_used_sub: ids[k] }); emit('subscriptions', 'update', x.rec); });
+        out = { subscription: ids[0], subscriptions: ids, count: q, codesUsed: CS.length }; collect(aid);
       } else {
         const planOf = s => db.plans.find(p => p.id === s.plan) || {};
         if (!runningOthers(db.subscriptions.filter(s => s.user === aid), b.subscription, planOf).length) throw new Error(PAYOUT_NEEDS_PLAN);
         if (!me.shirt_paid) throw new Error(NEED);
-        if (!String(b.details || '').trim()) throw new Error('Enter your delivery or bank details.');
-        short(amt); post(aid, -amt, 'clearance', 'Payout clearance fee', { subscription: b.subscription });
+        if (!payoutReady(me)) throw new Error('Add your payout details (account name, bank, 10-digit account number and address) on your Profile page before requesting a payout.');
+        b.details = [me.bank_account_name, me.bank_name, me.bank_account_number, me.address].join(' · ');
+        const sub = db.subscriptions.find(x => x.id === b.subscription) || {}; b.cleared = !!sub.clearance_paid_at;
+        if (!b.cleared) { short(amt); post(aid, -amt, 'clearance', 'Payout clearance fee', { subscription: b.subscription }); sub.clearance_paid_at = now(); emit('subscriptions', 'update', sub); }
         const p = { id: uid(), created: now(), user: aid, subscription: b.subscription, note: b.details, status: 'pending' }; db.payouts.push(p); emit('payouts', 'create', p);
       }
-      if (t !== 'join') { const f = { id: uid(), created: now(), user: aid, type: t, amount: amt, status: 'confirmed', plan: b.plan || '', subscription: b.subscription || '', details: b.details || '', note: 'Wallet' }; db.fees.push(f); emit('fees', 'create', f); }
-      else { const f = { id: uid(), created: now(), user: aid, type: 'join', amount: amt, status: 'confirmed', plan: b.plan, subscription: out.subscription, note: 'Wallet' }; db.fees.push(f); emit('fees', 'create', f); }
+      if (t !== 'join' && !b.cleared) { const f = { id: uid(), created: now(), user: aid, type: t, amount: amt, status: 'confirmed', plan: b.plan || '', subscription: b.subscription || '', details: b.details || '', note: 'Wallet' }; db.fees.push(f); emit('fees', 'create', f); }
       save(); return out;
     }
     return { status: 'confirmed' };
   };
-  return { collection: col, authStore, send };
+  const filter = (expr, params = {}) => expr.replace(/\{:(\w+)\}/g, (_, k) => JSON.stringify(String(params[k] ?? '')));   // same as pb.filter (the demo ignores complex filters)
+  // protected receipt files: the demo keeps them as data URLs on the record
+  const files = { getToken: async () => 'demo', getURL: (r, name) => (r && r.receipt_data) || '' };
+  return { collection: col, authStore, send, filter, files };
 }

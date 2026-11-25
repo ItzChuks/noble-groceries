@@ -76,3 +76,31 @@ Cash and Foodie plans run on a fixed season, **1 January to 30 November**; a mem
 - **Terms and Conditions**: `terms.html` (text lives in `termsHTML()` in `app.js`). Sign-up requires ticking the acceptance box; the server rejects sign-ups without it and stores `terms_accepted_at`.
 - **Foodie** is a third plan category next to cash and grocery (Admin > Plans > Add plan).
 - **Number of payments**: Admin > Plans > Add/Edit plan has a *Number of weeks* (days / months) field. It follows the saving period until you pick or type your own, for example 12 or 13 weeks, or 50 or 52 weeks. Members pay for exactly that number.
+
+
+## Jessy James features added (Nov 2026)
+
+Everything the Jessy James site does now works here too, with the Nobles Groceries look and wording. Cash, Foodie and Grocery
+plans all stay. Deploy the matching backend (noble-backend) at the same time: the routes are under `/api/noble/`.
+
+- **Wallet top-ups by bank transfer with a receipt.** Admin > Receipts > Account and settings: bank name, account number,
+  account name. Members transfer the amount + a **₦100 charge** (`FEES.tax`) and upload the receipt. The wallet is credited at
+  once; the admin approves or rejects it (a rejected one is taken back). Optional automatic receipt reading: set
+  `GEMINI_API_KEY` on Railway (flags only, never blocks the credit).
+- **Plan codes, Grocery plans only.** Every Grocery plan a member joins gets a code (`NG-XXXX-XXXX`). In Admin > Plans > Edit plan
+  (Grocery) choose **Codes come out on** and **Last day**. Until you pick the first day the codes wait as "Not open yet".
+  Changing the days later updates every unused code of that plan (codes you gave their own dates on a member's page keep them).
+  Codes can only be used to join Grocery plans; Cash and Foodie plans have no codes.
+- **Join a plan many times at once** (up to 50), with several codes pasted or ticked in one go. Plans joined together show as one card.
+- **Grocery schedule**: the first payment is taken on the joining day with the joining fee, then every day / every 7 days / every
+  month from that day, each due before 12:00 noon. **Payout opens after** a number of days set on each Grocery plan.
+  Cash and Foodie keep the 1 January to 30 November season, exactly as before.
+- **Payouts**: clearance fee taken automatically once per plan when all its payments are complete; another plan must have run
+  for at least 2 weeks; payout details (account name, bank, account number, address) are saved once on the Profile and then
+  only the admin can change them.
+- **Admin tools**: plan codes page (search, copy, mark used / expired, reopen, bulk actions), member page with Add existing plans,
+  Edit plan, credit / deduct wallet, reset late penalties, suspend / restore, reset password (temporary password),
+  reset account, delete permanently, undo / redo, user search in the top bar.
+- **Forgotten password** by a 6-digit email code (needs `BREVO_API_KEY` on Railway) or a temporary password from the admin.
+
+Demo mode (`USE_MOCK = true`): admin@noble.com / admin12345, user@noble.com / user12345.

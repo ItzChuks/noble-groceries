@@ -3,10 +3,11 @@
 <div class="w-full max-w-md">
   <a href="index.html" class="flex flex-col items-center gap-3 font-semibold text-white text-xl mb-6"><img src="logo.jpeg" alt="Nobles Groceries logo" class="w-16 h-16 rounded-xl shadow-lg">Nobles Groceries</a>
   <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8">
-    <div class="grid grid-cols-2 bg-slate-100 rounded-lg p-1 mb-6 text-sm font-medium"><button type="button" id="t-login" class="py-2 rounded-md">Log in</button><button type="button" id="t-register" class="py-2 rounded-md">Sign up</button></div>
+    <div id="tabs" class="grid grid-cols-2 bg-slate-100 rounded-lg p-1 mb-6 text-sm font-medium"><button type="button" id="t-login" class="py-2 rounded-md">Log in</button><button type="button" id="t-register" class="py-2 rounded-md">Sign up</button></div>
     <h1 id="ttl" class="text-xl font-semibold text-slate-900"></h1>
     <p id="sub" class="text-sm text-slate-500 mt-1 mb-5"></p>
     <form id="f" class="space-y-4" novalidate></form>
+    <p id="ok" role="status" class="hidden mt-4 text-sm text-emerald-800 bg-emerald-50 ring-1 ring-emerald-200 rounded-lg px-3 py-2"></p>
     <p id="err" role="alert" class="hidden mt-4 text-sm text-red-700 bg-red-50 ring-1 ring-red-200 rounded-lg px-3 py-2"></p>
     <p id="alt" class="text-sm text-slate-500 text-center mt-6"></p>
   </div>
@@ -258,12 +259,17 @@ const L=(t,id)=>`<label for="${id}" class="text-sm font-medium text-slate-700">$
 const field=(label,name,type,ac,extra='',hint='')=>`<div>${L(label,name)}<input id="${name}" name="${name}" type="${type}" autocomplete="${ac}" ${extra} class="${inp} mt-1">${hint?`<p class="text-xs text-slate-500 mt-1">${hint}</p>`:''}</div>`;
 const pwField=(label,name,ac,hint='')=>`<div>${L(label,name)}<div class="relative mt-1"><input id="${name}" name="${name}" type="password" autocomplete="${ac}" required minlength="8" class="${inp} pr-11"><button type="button" data-eye="${name}" aria-label="Show password" class="absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-slate-400 hover:text-slate-700">${svg(EYE)}</button></div>${hint?`<p class="text-xs text-slate-500 mt-1">${hint}</p>`:''}</div>`;
 
-let mode=new URLSearchParams(location.search).get('mode')==='register'?'register':'login';
+const QS=new URLSearchParams(location.search),RESET=QS.get('reset')||'';   // ?reset=<token> comes from the password-reset email
+let mode=RESET?'reset':['register','forgot','change'].includes(QS.get('mode'))?QS.get('mode'):'login';
+let resetEmail='',resendAt=0;   // forgotten password by email code: the email the code went to, and when a new code may be asked for
+let tempPw='';   // the temporary password just typed at sign-in (so the member does not have to type it again)
 let sel=C.find(c=>c.i==='NG');   // default country, changeable
 let shown=[],act=-1;
 
 // ---------- page ----------
 function draw(){
+ hideOk();$('#tabs').classList.toggle('hidden',['forgot','code','reset','change'].includes(mode));
+ if(['forgot','code','reset','change'].includes(mode))return drawPw();
  ['login','register'].forEach(m=>$('#t-'+m).className='py-2 rounded-md transition '+(m===mode?'bg-white shadow text-slate-900':'text-slate-500 hover:text-slate-700'));
  const reg=mode==='register';
  $('#ttl').textContent=reg?'Create your account':'Welcome back';
@@ -287,13 +293,46 @@ function draw(){
      <p class="text-xs text-slate-500 mt-1">Enter your number without the country code or leading 0.</p></div>`:'')
  +field('Email address','email','email',reg?'email':'username','required placeholder="you@example.com"')
  +pwField('Password',reg?'password':'password',reg?'new-password':'current-password',reg?'At least 8 characters.':'')
- +(reg?pwField('Confirm password','passwordConfirm','new-password'):'')
- +(reg?`<div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><p class="text-sm font-semibold">Before you join</p><ul class="list-disc pl-4 mt-1 space-y-0.5"><li>One-time t-shirt fee: <b>${naira(FEES.shirt)}</b>. You can use the site without it; it is only required when you request a payout.</li><li>Registration (joining) fee: <b>${naira(FEES.join)}</b>, taken from your wallet before you join any plan. You fund the wallet by transfer to your own account number.</li><li>Cash and Foodie savings run <b>1 January to 30 November</b>; joining part-way means paying the contributions already due.</li><li>Payout clearance fee: <b>${naira(FEES.clearance)}</b>, taken from your wallet with every payout request.</li><li>To request a payout from a plan, you must have another plan actively running.</li></ul></div>
+ +(reg?pwField('Confirm password','passwordConfirm','new-password'):'<p class="text-right"><button type="button" id="fp" class="text-sm text-emerald-800 font-medium hover:underline">Forgot password?</button></p>')
+ +(reg?`<div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><p class="text-sm font-semibold">Before you join</p><ul class="list-disc pl-4 mt-1 space-y-0.5"><li>One-time t-shirt fee: <b>${naira(FEES.shirt)}</b>. You can use the site without it; it is only required when you request a payout.</li><li>Registration (joining) fee: <b>${naira(FEES.join)}</b>, taken from your wallet before you join any plan. You fund the wallet by bank transfer and upload the receipt; every top-up carries a <b>${naira(FEES.tax)}</b> charge.</li><li>Cash and Foodie savings run <b>1 January to 30 November</b>; joining part-way means paying the contributions already due.</li><li>Payout clearance fee: <b>${naira(FEES.clearance)}</b> per plan, taken from your wallet once all its payments are complete.</li><li>To request a payout from a plan, you must have another plan actively running for at least 2 weeks.</li></ul></div>
   <label class="flex items-start gap-2 text-sm text-slate-700 cursor-pointer"><input id="terms" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0 accent-emerald-700"><span>I have read and accept the <a href="terms.html" target="_blank" class="text-emerald-800 underline">Terms and Conditions</a>, including these fees.</span></label>`:'')
  +`<button id="go" class="${btn} w-full py-2.5 mt-1">${reg?'Create account':'Log in'}</button>`;
  hideErr();
- document.querySelectorAll('[data-eye]').forEach(b=>b.onclick=()=>{const i=$('#'+b.dataset.eye),show=i.type==='password';i.type=show?'text':'password';b.innerHTML=svg(show?EYE_OFF:EYE);b.setAttribute('aria-label',show?'Hide password':'Show password')});
+ if($('#fp'))$('#fp').onclick=()=>{const em=($('#email')||{}).value||'';mode='forgot';draw();if(em)$('#email').value=em;$('#email').focus()};
+ eyes();
  if(reg)initCountry();
+}
+function eyes(){
+ document.querySelectorAll('[data-eye]').forEach(b=>b.onclick=()=>{const i=$('#'+b.dataset.eye),show=i.type==='password';i.type=show?'text':'password';b.innerHTML=svg(show?EYE_OFF:EYE);b.setAttribute('aria-label',show?'Hide password':'Show password')});
+ }
+
+// ---------- forgotten password ----------
+const waHelp=em=>'https://wa.me/'+SUPPORT_WHATSAPP+'?text='+encodeURIComponent('Hello Nobles Groceries support, I forgot my password. Please give me a temporary password.'+(em?'\nMy account email: '+em:''));
+function drawPw(){
+ if(mode==='code'){   // step 2: the code from the email + the new password
+  $('#ttl').textContent='Check your email';
+  $('#sub').innerHTML='We sent a 6-digit code to <b>'+esc(resetEmail)+'</b>. Copy it from the email (look in spam too), paste it below and choose a new password.';
+  $('#f').innerHTML=`<div>${L('Code from the email','code')}<input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required placeholder="123456" class="${inp} mt-1 text-center font-semibold" style="font-size:1.5rem;letter-spacing:.4em"></div>`
+   +pwField('New password','password','new-password','At least 8 characters.')+pwField('Confirm new password','passwordConfirm','new-password')
+   +`<button id="go" class="${btn} w-full py-2.5 mt-1">Reset password</button>`;
+  $('#alt').innerHTML='<button type="button" id="resend" class="text-emerald-800 font-medium hover:underline">Send a new code</button> · <a href="'+waHelp(resetEmail)+'" target="_blank" rel="noopener" class="text-emerald-800 font-medium hover:underline">No email? Ask on WhatsApp</a><br><button type="button" id="sw" class="text-slate-500 hover:underline mt-2">Back to log in</button>';
+  $('#sw').onclick=()=>{mode='login';draw();$('#email').value=resetEmail};
+  $('#resend').onclick=async()=>{if(Date.now()<resendAt)return showErr('Please wait '+Math.ceil((resendAt-Date.now())/1000)+' seconds before asking for a new code.');
+   try{hideErr();await pb.send('/api/noble/password/code',{method:'POST',body:{email:resetEmail}});resendAt=Date.now()+60e3;showOk('A new code is on its way to <b>'+esc(resetEmail)+'</b>.')}catch(x){showErr(x.response?.message||x.message)}};
+  const c=$('#code');c.oninput=()=>{c.value=c.value.replace(/\D/g,'').slice(0,6)};c.focus();
+  hideErr();eyes();return;
+ }
+ const fg=mode==='forgot',ch=mode==='change';
+ $('#ttl').textContent=fg?'Forgot your password?':ch?'Choose your own password':'Choose a new password';
+ $('#sub').textContent=fg?'Enter the email on your account. We will email you a 6-digit code to choose a new password.':ch?'You logged in with a temporary password. Choose your own password to continue.':'Enter your new password twice. You will then log in with it.';
+ $('#f').innerHTML=(fg?field('Email address on your account','email','email','username','required placeholder="you@example.com"')
+
+  :(ch?(tempPw?'':pwField('Temporary password (from customer care)','current','current-password'))+pwField('New password','password','new-password','At least 8 characters.')+pwField('Confirm new password','passwordConfirm','new-password')
+   :pwField('New password','password','new-password','At least 8 characters.')+pwField('Confirm new password','passwordConfirm','new-password')))
+  +`<button id="go" class="${btn} w-full py-2.5 mt-1">${fg?'Email me a code':ch?'Save and continue':'Save new password'}</button>`+(fg?`<p class="text-xs text-slate-500 text-center">No access to that email? <a id="wahelp" href="${waHelp('')}" target="_blank" rel="noopener" class="text-emerald-800 font-medium underline">Ask customer care on WhatsApp</a> for a temporary password.</p>`:'');
+ $('#alt').innerHTML='Remembered it? <button type="button" id="sw" class="text-emerald-800 font-medium hover:underline">Back to log in</button>';
+ $('#sw').onclick=()=>{mode='login';if(RESET)history.replaceState(null,'',location.pathname);draw()};
+ hideErr();eyes();
 }
 
 // ---------- searchable country picker ----------
@@ -329,15 +368,59 @@ function initCountry(){
 // ---------- feedback ----------
 const showErr=m=>{const e=$('#err');e.textContent=m;e.classList.remove('hidden')};
 const hideErr=()=>{const e=$('#err');e.textContent='';e.classList.add('hidden')};
-const busy=on=>{const b=$('#go');b.disabled=on;b.classList.toggle('opacity-70',on);b.textContent=on?'Please wait…':(mode==='register'?'Create account':'Log in')};
+const showOk=m=>{const e=$('#ok');e.innerHTML=m;e.classList.remove('hidden')};
+const hideOk=()=>{const e=$('#ok');e.innerHTML='';e.classList.add('hidden')};
+const LBL={register:'Create account',login:'Log in',forgot:'Email me a code',code:'Reset password',reset:'Save new password',change:'Save and continue'};
+const busy=on=>{const b=$('#go');b.disabled=on;b.classList.toggle('opacity-70',on);b.textContent=on?'Please wait…':LBL[mode]};
 
 // ---------- submit ----------
 $('#t-login').onclick=()=>{mode='login';draw()};
 $('#t-register').onclick=()=>{mode='register';draw()};
 $('#f').onsubmit=async e=>{
- e.preventDefault();hideErr();
+ e.preventDefault();hideErr();hideOk();
  const d=Object.fromEntries(new FormData(e.target));
  const email=(d.email||'').trim();
+ if(['forgot','code','reset','change'].includes(mode)){
+  try{
+   if(mode==='forgot'){
+    if(!/^\S+@\S+\.\S+$/.test(email))throw new Error('Enter the email address on your account.');
+    busy(true);await pb.send('/api/noble/password/code',{method:'POST',body:{email}});busy(false);
+    resetEmail=email;resendAt=Date.now()+60e3;mode='code';draw();
+    showOk('If <b>'+esc(email)+'</b> has an account, the code is on its way. It works for 15 minutes.');
+   }else if(mode==='code'){
+    const code=String(d.code||'').replace(/\D/g,'');
+    if(code.length!==6)throw new Error('Enter the 6-digit code from the email.');
+    if((d.password||'').length<8)throw new Error('Password must be at least 8 characters.');
+    if(d.password!==d.passwordConfirm)throw new Error('Passwords do not match.');
+    busy(true);await pb.send('/api/noble/password/reset',{method:'POST',body:{email:resetEmail,code,password:d.password,passwordConfirm:d.passwordConfirm}});
+    await pb.collection('users').authWithPassword(resetEmail,d.password);
+    location.href=pb.authStore.record.role==='admin'?'admin.html':'dashboard.html';return;
+   }else if(mode==='change'){
+    const cur=tempPw||d.current||'';
+    if(!cur)throw new Error('Enter the temporary password customer care gave you.');
+    if((d.password||'').length<8)throw new Error('Password must be at least 8 characters.');
+    if(d.password!==d.passwordConfirm)throw new Error('Passwords do not match.');
+    if(!pb.authStore.isValid){mode='login';draw();throw new Error('Please log in again with the temporary password.')}
+    busy(true);const em=pb.authStore.record.email;
+    await pb.send('/api/noble/me/password',{method:'POST',body:{current:cur,password:d.password,passwordConfirm:d.passwordConfirm}});
+    await pb.collection('users').authWithPassword(em,d.password);tempPw='';
+    location.href=pb.authStore.record.role==='admin'?'admin.html':'dashboard.html';return;
+   }else{
+    if((d.password||'').length<8)throw new Error('Password must be at least 8 characters.');
+    if(d.password!==d.passwordConfirm)throw new Error('Passwords do not match.');
+    busy(true);await pb.collection('users').confirmPasswordReset(RESET,d.password,d.passwordConfirm);
+    history.replaceState(null,'',location.pathname);mode='login';draw();
+    showOk('Your password has been changed. Log in with your new password.');
+   }
+  }catch(x){
+   busy(false);
+   if((mode==='change'||mode==='code'||mode==='forgot')&&x.status===400){showErr(x.response?.message||x.message);return}
+   if(mode==='reset'&&x.status===400&&x.response?.data?.token){showErr('This reset link is invalid, already used or expired.');$('#alt').innerHTML='<button type="button" id="again" class="text-emerald-800 font-medium hover:underline">Send me a new link</button>';$('#again').onclick=()=>{history.replaceState(null,'',location.pathname);mode='forgot';draw()};return}
+   const m=Object.values(x.response?.data||{}).map(v=>v.message).join(' ');
+   showErr(x.status===0?'Can\u2019t reach the server. Check your internet connection and try again.':x.status===429?'Too many attempts. Wait a few minutes and try again.':mode==='reset'&&x.status===400?(m||'This reset link is invalid or has expired. Ask for a new one.'):(m||x.message));
+  }
+  return;
+ }
  try{
   if(!email||!d.password)throw new Error('Enter your email and password.');
   if(mode==='register'){
@@ -353,13 +436,22 @@ $('#f').onsubmit=async e=>{
   }
   busy(true);
   await pb.collection('users').authWithPassword(email,d.password);
+  if(pb.authStore.record.must_change_password){tempPw=d.password;busy(false);mode='change';draw();return}   // signed in with a temporary password
   location.href=pb.authStore.record.role==='admin'?'admin.html':'dashboard.html';
  }catch(x){
   busy(false);
+  // the email is already registered (PocketBase says "Value must be unique"): explain and offer log in / forgot password
+  if(mode==='register'&&x.response?.data?.email?.code==='validation_not_unique'){
+   showErr('An account with '+email+' already exists. Log in with it, or use Forgot password if you do not remember the password.');
+   $('#alt').innerHTML='<button type="button" id="tol" class="text-emerald-800 font-medium hover:underline">Log in with '+esc(email)+'</button> · <button type="button" id="tof" class="text-emerald-800 font-medium hover:underline">Forgot password?</button>';
+   $('#tol').onclick=()=>{mode='login';draw();$('#email').value=email;$('#password').focus()};
+   $('#tof').onclick=()=>{mode='forgot';draw();$('#email').value=email};
+   return}
   const m=Object.values(x.response?.data||{}).map(v=>v.message).join(' ');
   showErr(m||(x.status===0?'Can\u2019t reach the server. Check your internet connection and try again.':(mode==='login'&&x.status===400?'Incorrect email or password.':x.message)));
  }
 };
 draw();
+try{const sm=sessionStorage.getItem('noble_suspended');if(sm){sessionStorage.removeItem('noble_suspended');showErr(sm)}}catch(_){}
 })();
 </script></body></html>
