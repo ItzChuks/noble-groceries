@@ -1,12 +1,68 @@
-// ===== CONFIG =====
+// ===== CONFIG (edit these) =====
 const PB_URL = 'https://noble-backend-production-16f3.up.railway.app';
 const USE_MOCK = false; // false = real PocketBase (default). true = offline demo using localStorage + mock.js.
-const pb = USE_MOCK ? createMockPB() : new PocketBase(PB_URL);
-pb.autoCancellation?.(false);
+const BRAND = 'Nobles Groceries';                       // name used on invoices, receipts and messages
 const SUPPORT_PHONE = '08026701578';                      // customer-support number (also used on invoices)
-// Fees (naira). Display only: the amounts that are actually charged are set on the server (pb_hooks/fees.js, keep them in sync).
-const FEES = { shirt: 5000, join: 3000, clearance: 3000 };
-const SUPPORT_WHATSAPP = '234' + SUPPORT_PHONE.slice(1);  // same number in international form for WhatsApp // the pages fire several identical requests in parallel; don't let the SDK cancel them
+// Fees (naira). Display only: the amounts that are actually charged are set on the server (pb_hooks/wallet.js FEES and
+// pb_hooks/transfers.js TAX; keep them in sync). tax = the charge added to every wallet deposit.
+const FEES = { shirt: 5000, join: 3000, clearance: 3000, tax: 100 };
+const MAX_SLOTS = 50;   // the most times a plan can be joined in ONE go; no limit on how many plans a member holds (pb_hooks/wallet.js)
+const pb = USE_MOCK ? createMockPB() : new PocketBase(PB_URL);
+// a suspended member is signed out at their next request and sees the reason on the sign-in page (pb_hooks/main.pb.js)
+if (!USE_MOCK) pb.afterSend = (res, data) => {
+  if (res.status === 403 && /suspended/i.test((data && data.message) || '') && pb.authStore.isValid && pb.authStore.record?.collectionName === 'users') {
+    pb.authStore.clear(); try { sessionStorage.setItem('noble_suspended', data.message); } catch (_) { }
+    if (!/auth\.html/.test(location.pathname)) location.href = 'auth.html';
+  }
+  return data;
+};
+pb.autoCancellation?.(false);   // the pages fire several identical requests in parallel; don't let the SDK cancel them
+
+// ===== loading state on buttons + a thin progress bar while the server is working =====
+// A clicked button shows a spinner and cannot be clicked again while the requests it started are running (also chained ones,
+// e.g. load then save). Works for every button on every page without changes elsewhere: requests are tracked through fetch.
+(() => {
+  if (typeof window === 'undefined' || window._jjBusy) return; window._jjBusy = true;
+  const css = document.createElement('style');
+  css.textContent = `button[data-busy]{position:relative;pointer-events:none;cursor:progress;opacity:.8}
+button[data-busy]>*,button[data-busy]{color:transparent!important}
+button[data-busy]::after{content:"";position:absolute;inset:0;margin:auto;width:1.05em;height:1.05em;border-radius:9999px;
+ border:2px solid var(--jjsp,#64748b);border-right-color:transparent;animation:jjspin .6s linear infinite}
+@keyframes jjspin{to{transform:rotate(360deg)}}
+#jjbar{position:fixed;top:0;left:0;height:3px;width:0;z-index:9999;background:#f59e0b;opacity:0;transition:width .3s ease,opacity .3s ease;pointer-events:none}`;
+  (document.head || document.documentElement).appendChild(css);
+  let bar = null, inflight = 0, barT = null, navAt = Date.now();
+  addEventListener('hashchange', () => { if (Date.now() - (window._jjQuiet || 0) > 500) navAt = Date.now(); }, true);
+  const showBar = () => { if (!document.body) return; bar = bar || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'jjbar' }));
+    clearTimeout(barT); bar.style.opacity = '1'; bar.style.width = Math.min(90, (parseFloat(bar.style.width) || 10) + 25) + '%'; };
+  const hideBar = () => { if (!bar) return; bar.style.width = '100%'; barT = setTimeout(() => { bar.style.opacity = '0'; setTimeout(() => { if (!inflight) bar.style.width = '0'; }, 300); }, 150); };
+  // the button that was just clicked (or whose form was just submitted) owns the requests started in the next moment
+  let armed = null, armedAt = 0;
+  const arm = b => { if (!b || b.disabled) return; armed = b; armedAt = Date.now(); };
+  const stop = e => { e.preventDefault(); e.stopImmediatePropagation(); };
+  addEventListener('click', e => { const b = e.target.closest && e.target.closest('button'); if (!b) return; if (b.hasAttribute('data-busy')) return stop(e); arm(b); }, true);
+  addEventListener('submit', e => { const b = e.submitter || e.target.querySelector('button:not([type="button"])'); if (b && b.hasAttribute('data-busy')) return stop(e); arm(b); }, true);
+  const owner = () => { if (armed && (armed._jjN > 0 || Date.now() - armedAt < 400) && armed.isConnected) return armed; return null; };
+  const busy = b => { b._jjN = (b._jjN || 0) + 1; if (b._jjN === 1) {
+    const bg = getComputedStyle(b).backgroundColor, dark = (m => m && (+m[1] * .3 + +m[2] * .59 + +m[3] * .11) < 150 && !/, 0\)$/.test(bg))(bg.match(/(\d+), (\d+), (\d+)/));
+    b.style.setProperty('--jjsp', dark ? '#fff' : '#64748b'); b.setAttribute('data-busy', ''); b.setAttribute('aria-busy', 'true'); b._jjDis = b.disabled; } };
+  const done = b => setTimeout(() => {            // short grace: a follow-up request (load, then save) keeps the spinner going
+    if (--b._jjN > 0) return; b._jjN = 0; b.removeAttribute('data-busy'); b.removeAttribute('aria-busy');
+    if (armed === b) armedAt = Date.now() - 350; }, 120);
+  const f0 = window.fetch && window.fetch.bind(window); if (!f0) return;
+  window.fetch = function (input, init) {
+    const url = String((input && input.url) || input || ''), quiet = /\/api\/realtime/.test(url);   // the live connection is not a click
+    const b = quiet ? null : owner();
+    if (b) busy(b);
+    const bg = !b && (Date.now() - (window._jjQuiet || 0) < 3000 || Date.now() - navAt > 3000);   // background refresh: no bar
+    const counted = !quiet && !bg;
+    if (counted) { inflight++; showBar(); }
+    const end = () => { if (b) done(b); if (counted && --inflight <= 0) { inflight = 0; hideBar(); } };
+    let p; try { p = f0(input, init); } catch (x) { end(); throw x; }
+    return p.then(r => { end(); return r; }, x => { end(); throw x; });
+  };
+})();
+const SUPPORT_WHATSAPP = '234' + SUPPORT_PHONE.slice(1);  // same number in international form for WhatsApp
 
 document.head.insertAdjacentHTML('beforeend', '<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet"><style>body{font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}</style>');
 
@@ -20,12 +76,20 @@ const inp = 'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-s
 const btn = 'inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg bg-emerald-800 text-white hover:bg-emerald-900 transition';
 const btn2 = 'inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition';
 const refresh = () => dispatchEvent(new Event('hashchange'));
-const FEE_LABEL = { shirt: 'T-shirt registration', join: 'Joining fee', clearance: 'Payout clearance fee' };
+const FEE_LABEL = { shirt: 'T-shirt registration', join: 'Joining fee', clearance: 'Payout clearance fee', tax: 'Deposit charge' };
 const FQ = { daily: 'day', weekly: 'week', monthly: 'month' };
 // A plan's saving period is set in months; the number of payments follows from the frequency (daily ~30.4/month, weekly ~4.35/month, monthly 1/month)
 const paymentsFor = (months, f) => f === 'daily' ? Math.round(months * 365 / 12) : f === 'weekly' ? Math.round(months * 52.14 / 12) : months;
 const monthsOf = p => p.months > 0 ? p.months : Math.max(1, Math.round(p.duration * (p.frequency === 'daily' ? 12 / 365 : p.frequency === 'weekly' ? 12 / 52.14 : 1)));
+// Grocery plans run for a number of weeks (4, 8, 12, 25...). Older plans without "weeks" are estimated from their payments.
+const weeksOf = p => p.weeks > 0 ? p.weeks : Math.max(1, Math.round(p.frequency === 'daily' ? p.duration / 7 : p.frequency === 'weekly' ? p.duration : p.duration * 4.345));
+const PLAN_WEEKS = [4, 8, 12, 25];
 const monthsLabel = p => { if (isSeasonal(p)) return 'Jan 1 – Nov 30'; const m = monthsOf(p); return m + ' month' + (m === 1 ? '' : 's'); };
+// plan codes: GROCERY plans only. The admin picks the day the plan's codes come out (code_open_day) and their last day
+// (code_close_day), "YYYY-MM-DD" on the Lagos calendar (pb_hooks/rules.js planCodeWindow).
+const hasCodes = p => p && p.category === 'grocery';
+const ymdDay = s => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 11)).toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', year: 'numeric' }) : ''; };
+const codeDays = p => !hasCodes(p) ? '' : !p.code_open_day ? 'Date to be announced' : ymdDay(p.code_open_day) + (p.code_close_day ? ' to ' + ymdDay(p.code_close_day) : ' onwards');
 const ic = d => `<svg class="w-[18px] h-[18px] shrink-0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="${d}"/></svg>`;
 const WA_PATH = 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z';
 const waIcon = (cls = 'w-[18px] h-[18px]') => `<svg class="${cls} shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${WA_PATH}"/></svg>`;
@@ -34,7 +98,7 @@ const waLink = () => {
   const t = "Hello Nobles Groceries support, I need some help." + (u ? '\nName: ' + (u.name || '') + '\nEmail: ' + (u.email || '') : '');
   return 'https://wa.me/' + SUPPORT_WHATSAPP + '?text=' + encodeURIComponent(t);
 };
-const IC = { overview: 'M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-3H4z', plans: 'M4 6h16M4 12h16M4 18h10', mine: 'M4 20V10M10 20V4M16 20v-7M22 20H2', payments: 'M3 6h18v12H3zM3 10h18', fees: 'M3 6h18v12H3zM3 10h18', payouts: 'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14', profile: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0', users: 'M16 20v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM21 20v-1a4 4 0 00-3-3.9', subs: 'M9 12l2 2 4-4M5 4h14v16H5z', out: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h9', menu: 'M4 6h16M4 12h16M4 18h16', moon: 'M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z', sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4', rules: 'M9 12h6M9 16h6M7 3h8l4 4v14H7zM15 3v4h4', wallet: 'M3 7h16a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2zM3 7l2-3h12v3M16 13.5h2', search: 'M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z' };
+const IC = { overview: 'M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-3H4z', plans: 'M4 6h16M4 12h16M4 18h10', mine: 'M4 20V10M10 20V4M16 20v-7M22 20H2', payments: 'M3 6h18v12H3zM3 10h18', fees: 'M3 6h18v12H3zM3 10h18', payouts: 'M12 4v11m0 0l-4-4m4 4l4-4M5 20h14', profile: 'M12 12a4 4 0 100-8 4 4 0 000 8zM4 21a8 8 0 0116 0', users: 'M16 20v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM21 20v-1a4 4 0 00-3-3.9', subs: 'M9 12l2 2 4-4M5 4h14v16H5z', out: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h9', menu: 'M4 6h16M4 12h16M4 18h16', moon: 'M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z', sun: 'M12 16a4 4 0 100-8 4 4 0 000 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4', rules: 'M9 12h6M9 16h6M7 3h8l4 4v14H7zM15 3v4h4', wallet: 'M3 7h16a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2zM3 7l2-3h12v3M16 13.5h2', search: 'M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15z', codes: 'M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L3 13V3h10l7.6 7.6a2 2 0 010 2.8zM7.5 7.5h.01', deposits: 'M12 20V9m0 0l-4 4m4-4l4 4M5 4h14' };
 
 // ===== theme (light / dark) =====
 const THEME_KEY = 'noble_theme';
@@ -78,6 +142,8 @@ html.dark *{border-color:#24332d}
 .dark .ring-blue-200{--tw-ring-color:rgba(96,165,250,.3)}
 .dark .ring-slate-200{--tw-ring-color:#2c3f37}
 .dark select option{background-color:#111c18;color:#e2ebe7}
+.dark .border-emerald-200{border-color:rgba(52,211,153,.3)}
+.dark .text-emerald-200{color:#a7f3d0}
 </style>`);
 
 // ===== payment rules (all deadlines use Lagos time, WAT = UTC+1, no daylight saving) =====
@@ -89,7 +155,9 @@ const fromL = (y, m, d, h = 0, mi = 0, s = 0) => new Date(Date.UTC(y, m, d, h, m
 const parseTs = s => { if (s instanceof Date) return s; const t = String(s).trim().replace(' ', 'T'); return new Date(/(Z|[+-]\d\d:?\d\d)$/.test(t) ? t : t + 'Z'); };
 const unit = (n, f) => FQ[f] + (n === 1 ? '' : 's');
 const plural = (n, f) => n + ' ' + unit(n, f);
-const fmtDue = (f, d) => !d ? 'Fully paid' : d.toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) + (f === 'monthly' ? ' (end of day)' : ', ' + RULES.cutoffHour + ':00 noon');
+// a deadline at 12:00 is shown as "before 12:00 noon" on that day; a midnight deadline (the joining-day payment) as "by end of" the day before
+const fmtDue = (f, d) => { if (!d) return 'Fully paid'; const o = { timeZone: 'Africa/Lagos', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }, noon = toL(d).getUTCHours() === RULES.cutoffHour;
+  return noon ? d.toLocaleDateString('en-GB', o) + ', before ' + RULES.cutoffHour + ':00 noon' : new Date(d.getTime() - 1).toLocaleDateString('en-GB', o) + ', by end of day'; };
 
 // deadline of the very first instalment, from the moment the user joined
 function firstDue(freq, joined) {
@@ -122,10 +190,22 @@ function seasonCount(freq, y) {
 }
 // the season someone joining at "joined" belongs to: this year's, unless every instalment of it is already due
 const seasonYear = (freq, joined) => { const y = toL(joined).getUTCFullYear(); return dueAt(freq, seasonFirst(freq, y), seasonCount(freq, y) - 1) > joined ? y : y + 1; };
+// ---- joining-day schedule (grocery plans), same as pb_hooks/rules.js: the first payment is due on the day the member joins,
+//      then every 7 days (weekly), every day (daily) or every month (monthly) counted from that day. A payment can be taken from the start of its due day
+//      and is late if still unpaid at 12:00 noon that day (the first payment is taken on joining, so never late).
+//      Payouts open "payout_after_days" days after joining (e.g. 30 for a 4-week plan).
+//      Monthly grocery plans: on the same date every month (a 31st becomes the last day of a shorter month).
+const STEP = { daily: 1, weekly: 7, monthly: 30 };
+const dayStart = (joined, k, h = 0) => { const L = toL(parseTs(joined)); return fromL(L.getUTCFullYear(), L.getUTCMonth(), L.getUTCDate() + k, h); };
+const monthStart = (joined, i, h = 0) => { const L = toL(parseTs(joined)), y = L.getUTCFullYear(), m = L.getUTCMonth(), last = new Date(Date.UTC(y, m + i + 1, 0)).getUTCDate(); return fromL(y, m + i, Math.min(L.getUTCDate(), last), h); };
+const joinSched = (sub, pl) => { const j = sub.created;
+  if (pl.frequency === 'monthly') return { first: dayStart(j, 1), n: pl.duration, step: 30, due: i => i === 0 ? dayStart(j, 1) : monthStart(j, i, RULES.cutoffHour), opens: i => monthStart(j, i) };
+  const step = STEP[pl.frequency] || 7; return { first: dayStart(j, 1), n: pl.duration, step, due: i => i === 0 ? dayStart(j, 1) : dayStart(j, i * step, RULES.cutoffHour), opens: i => dayStart(j, i * step) }; };
+const payoutDays = pl => pl.payout_after_days > 0 ? pl.payout_after_days : pl.frequency === 'monthly' ? Math.round((pl.duration - 1) * 30.5) + 1 : (pl.duration - 1) * (STEP[pl.frequency] || 7) + 1;
 // the schedule of one subscription: { first, n (number of instalments), due(i), season? }
 function sched(sub, pl) {
   const f = pl.frequency, joined = parseTs(sub.created);
-  if (!isSeasonal(pl)) { const first = firstDue(f, joined); return { first, n: pl.duration, due: i => dueAt(f, first, i) }; }
+  if (!isSeasonal(pl)) return joinSched(sub, pl);
   const y = seasonYear(f, joined), first = seasonFirst(f, y);
   return { first, n: seasonCount(f, y), due: i => dueAt(f, first, i), season: y };
 }
@@ -138,16 +218,20 @@ const totalOf = p => p.amount * nPay(p);
 const payoutOf = p => isSeasonal(p) ? totalOf(p) : p.payout;
 // when an instalment becomes collectable from the wallet: from the start of its period (daily: midnight, weekly: Monday, monthly: the 1st), never before the season starts
 function collectAt(sub, pl, i) {
+  if (!isSeasonal(pl)) return joinSched(sub, pl).opens(i);
   const S = sched(sub, pl), L = toL(S.due(i)), y = L.getUTCFullYear(), m = L.getUTCMonth(), d = L.getUTCDate();
   const t = pl.frequency === 'daily' ? fromL(y, m, d, 0) : pl.frequency === 'weekly' ? fromL(y, m, d - 4, 0) : fromL(y, m, 1, 0);
   if (!S.season) return t;
   const start = fromL(S.season, 0, 1, 0); return t < start ? start : t;
 }
 // when the saving period ends = deadline of the last instalment; payouts open after this moment
-const termEnd = (sub, pl) => { const S = sched(sub, pl); return S.due(S.n - 1); };
-const PAYOUT_NEEDS_PLAN = 'To request a payout you must have another plan actively running. Join a new plan first, then request this payout.';
-// the member's OTHER plans that are still running: active, and their saving period has not ended yet (plOf gives a subscription's plan)
-const runningOthers = (subs, sid, plOf) => subs.filter(o => o.id !== sid && o.status === 'active' && plOf(o).frequency && Date.now() < termEnd(o, plOf(o)).getTime());
+const termEnd = (sub, pl) => { if (!isSeasonal(pl)) return dayStart(sub.created, payoutDays(pl)); const S = sched(sub, pl); return S.due(S.n - 1); };
+const PAYOUT_MIN_DAYS = 14;   // the other running plan must have been joined at least this long ago (pb_hooks/rules.js)
+const PAYOUT_NEEDS_PLAN = 'To request a payout you must have another plan that has been actively running for at least 2 weeks. Join a new plan and request this payout once it has run for 2 weeks.';
+// the member's OTHER plans that are still running: active, saving period not ended, and joined at least 2 weeks ago (plOf gives a subscription's plan)
+const runningOthers = (subs, sid, plOf, minDays = PAYOUT_MIN_DAYS) => subs.filter(o => o.id !== sid && o.status === 'active' && plOf(o).frequency && Date.now() < termEnd(o, plOf(o)).getTime() && Date.now() - parseTs(o.created).getTime() >= minDays * 864e5);
+// when the soonest of those other plans reaches 2 weeks (for the hint on the payout button), or null
+const payoutOpensAt = (subs, sid, plOf) => { const l = runningOthers(subs, sid, plOf, 0).map(o => parseTs(o.created).getTime() + PAYOUT_MIN_DAYS * 864e5); return l.length ? new Date(Math.min(...l)) : null; };
 const fmtDay = d => d.toLocaleDateString('en-GB', { timeZone: 'Africa/Lagos', day: 'numeric', month: 'short', year: 'numeric' });
 // how many instalments a payment record covers (older records without the field are estimated)
 const instOf = (p, pl) => p.installments || Math.max(1, Math.round(((p.amount || 0) - (p.penalty || 0)) / (pl.amount || 1)));
@@ -158,7 +242,8 @@ function planState(sub, pl, pays, now = new Date()) {
   const paid = pays.filter(p => p.subscription === sub.id && p.status !== 'rejected').reduce((a, p) => a + instOf(p, pl), 0);
   const left = Math.max(0, S.n - paid);
   let overdue = 0; while (overdue < left && due(paid + overdue) <= now) overdue++;
-  return { A, pen, paid, left, duration: S.n, due, overdue, next: left ? due(paid) : null, cost: k => A + (k < overdue ? pen : 0) };
+  const wv = sub.no_penalty_before ? parseTs(sub.no_penalty_before) : null;   // plans brought over without penalties on what was already overdue (pb_hooks/rules.js)
+  return { A, pen, paid, left, duration: S.n, due, overdue, next: left ? due(paid) : null, cost: k => A + (k < overdue && !(wv && due(paid + k) <= wv) ? pen : 0) };
 }
 // Wallet view of one subscription: is its next instalment ready to be collected, and is the wallet able to cover it?
 //   'done' fully paid | 'scheduled' not collectable yet (shows when) | 'waiting' ready but the wallet is short (shows how much to add)
@@ -177,24 +262,28 @@ const covers = p => { const pl = p.expand?.subscription?.expand?.plan || {}; ret
 const feeRulesHTML = () => {
   const c = (t, d) => `<div class="bg-white border rounded-xl p-5"><h3 class="font-semibold text-slate-900 text-sm">${t}</h3><p class="text-sm text-slate-600 mt-1.5 leading-relaxed">${d}</p></div>`;
   return '<div class="grid md:grid-cols-2 gap-4 max-w-4xl">'
-    + c('Your wallet', `Every member has a <b>wallet</b> on the dashboard. You add money to it by bank transfer to your own fixed account number, and the transfer is confirmed automatically in real time. Every fee and every contribution is taken from your wallet.`)
+    + c('Your wallet', `Every member has a <b>wallet</b> on the dashboard. You add money to it by bank transfer to the account shown on the Wallet page, then upload your receipt. Your wallet is credited as soon as the receipt is uploaded, and the admin then confirms the payment. Every fee and every contribution is taken from your wallet.`)
+    + c(`Deposit charge · ${naira(FEES.tax)}`, `Every top-up of your wallet carries a <b>${naira(FEES.tax)} charge</b>. To put ${naira(3000)} in your wallet you transfer <b>${naira(3000 + FEES.tax)}</b>; your wallet receives the full ${naira(3000)}.`)
     + c(`Registration (joining) fee · ${naira(FEES.join)}`, `Before you can join any plan, ${naira(FEES.join)} is taken from your wallet. It is paid each time you join a plan, separately from your contributions. If your wallet is short, you will be asked to top up first.`)
+    + c('Joining a plan more than once', `You can join the same plan as many times as you like, up to <b>${MAX_SLOTS} at a time</b>. Each one is a separate plan with its own joining fee, contributions and payout.`)
     + c('Cash and Foodie seasons', `Cash and Foodie savings run from <b>1 January to 30 November</b>. If you join part-way through the season (for example in March), you first pay the contributions that have fallen due <b>from January up to the day you join</b>, taken from your wallet together with the joining fee. There is no penalty on those.`)
+    + c('Plan codes (Grocery plans)', `Every <b>Grocery</b> plan you join gives you a <b>plan code</b>. The admin announces the day the codes come out and their last day. While a code is usable, you (or anyone you share it with) can enter it when joining a new Grocery plan. A code works <b>once only</b>; after that it shows as used, with who used it. An unused code shows as expired after its last day. Cash and Foodie plans do not have plan codes.`)
     + c(`T-shirt registration · ${naira(FEES.shirt)}`, `A <b>one-time</b> payment for your Nobles Groceries t-shirt, taken from your wallet. It is only required <b>when you request a payout</b>. Once it is paid you become a <b>registered</b> member.`)
-    + c(`Payout clearance fee · ${naira(FEES.clearance)}`, `Every payout request carries a ${naira(FEES.clearance)} clearance fee, taken from your wallet. Your request is sent to the admin as soon as it is paid.`)
-    + c('Another plan must be running', `Before you can request a payout from a plan, you must have <b>another plan actively running</b>: a plan you have joined whose saving period has not ended. If you have none, join a new plan first, then request your payout.`)
+    + c(`Payout clearance fee · ${naira(FEES.clearance)}`, `When all the payments on a plan are complete, a ${naira(FEES.clearance)} clearance fee for <b>that plan</b> is taken from your wallet automatically (as soon as you top up, if your wallet is short). You cannot request that plan's payout until it is paid. It is paid once per plan.`)
+    + c('Bank details on your Profile', `Save your <b>account name, bank, 10-digit account number and address</b> on the Profile page. Payouts are paid into that account. Once saved, only the admin can change them.`)
+    + c('Another plan must be running', `Before you can request a payout from a plan, you must have <b>another plan actively running for at least 2 weeks</b>: a plan you joined at least 14 days ago whose saving period has not ended. If you have none, join a new plan first, then request your payout once it has run for 2 weeks.`)
     + '</div>';
 };
 const termsHTML = () => {
   const m = RULES.lateMultiplier, S = (n, t, body) => `<section class="bg-white border rounded-xl p-5 sm:p-6"><h2 class="font-semibold text-slate-900">${n}. ${t}</h2><div class="text-sm text-slate-600 mt-2 leading-relaxed space-y-2">${body}</div></section>`;
   return '<div class="space-y-4">'
     + S(1, 'About these terms', `<p>Nobles Groceries is a budget and isusu savings platform where members contribute daily, weekly or monthly towards a cash or goods payout. By creating an account you confirm that you have read, understood and accepted these Terms and Conditions, including every fee listed below.</p>`)
-    + S(2, 'Your wallet and your account number', `<p>Every member has a <b>wallet</b> on their dashboard and a <b>fixed virtual bank account number</b> of their own. You fund your wallet by transferring money to that account number. The transfer is confirmed automatically, usually within moments, and the money appears in your wallet.</p><p>All fees and contributions are paid <b>from your wallet</b>. Money in your wallet stays yours until a fee or contribution is taken from it under these terms.</p>`)
-    + S(3, 'Registration (joining) fee', `<p>Before you can join any plan, a registration fee of <b>${naira(FEES.join)}</b> is deducted from your wallet. It is paid each time you join a plan and is separate from your contributions. If your wallet does not hold enough, you cannot join until you top up.</p>`)
-    + S(4, 'Plans and seasons', `<p>We offer three kinds of plan: <b>Cash</b>, <b>Groceries</b> and <b>Foodie</b>. Every plan shows its contribution amount, how often you pay, its saving period, the number of payments and the payout.</p><p><b>Cash and Foodie</b> savings run from <b>1 January to 30 November</b>. If you join after the season has started, you must first pay the contributions that fell due from 1 January up to the day you join. This catch-up is calculated automatically, is taken from your wallet together with the registration fee, and carries no penalty. <b>Groceries</b> plans run from the day you join, for the number of payments shown on the plan.</p>`)
-    + S(5, 'Automatic payments, deadlines and late penalties', `<p>You do not pay each contribution by hand. At the start of each payment period your plan's contribution is taken from your wallet automatically. If you have several plans and your wallet cannot cover them all, plans are served from the oldest deadline first; a plan that cannot be covered <b>waits</b> and is paid automatically as soon as you top up.</p><p>All deadlines use Lagos time (WAT). Daily plans are due before <b>${RULES.cutoffHour}:00 noon</b> each day. Weekly plans are due by <b>Friday ${RULES.cutoffHour}:00 noon</b>. Monthly plans are due by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>.</p><p>A contribution that is still unpaid after its deadline costs double when it is collected (for example ${naira(100)} becomes ${naira(100 * m)}). The extra amount is a penalty: it does not count towards your savings or payout. Keep enough in your wallet to avoid it.</p>`)
+    + S(2, 'Your wallet', `<p>Every member has a <b>wallet</b> on their dashboard. You fund your wallet by bank transfer to the account shown on the Wallet page, then upload the receipt (screenshot, photo or PDF). Your wallet is <b>credited as soon as you upload the receipt</b>; the admin then confirms every payment against the bank statement. If the money did not reach our account, the top-up is <b>reversed</b>: the amount is taken back from your wallet, even if this takes your balance below zero. Uploading a false or edited receipt may lead to your account being <b>suspended</b>.</p><p>Every top-up carries a charge of <b>${naira(FEES.tax)}</b>, added to the amount you transfer (for example, to add ${naira(3000)} you transfer ${naira(3000 + FEES.tax)}). The charge is not added to your wallet.</p><p>All fees and contributions are paid <b>from your wallet</b>. Money in your wallet stays yours until a fee or contribution is taken from it under these terms.</p>`)
+    + S(3, 'Registration (joining) fee', `<p>Before you can join any plan, a registration fee of <b>${naira(FEES.join)}</b> is deducted from your wallet. It is paid each time you join a plan and is separate from your contributions. If your wallet does not hold enough, you cannot join until you top up.</p><p>You may join the same plan as many times as you like, including several at once (up to <b>${MAX_SLOTS} at a time</b>). Each one is a separate plan with its own joining fee, contributions and payout.</p>`)
+    + S(4, 'Plans and seasons', `<p>We offer three kinds of plan: <b>Cash</b>, <b>Groceries</b> and <b>Foodie</b>. Every plan shows its contribution amount, how often you pay, its saving period, the number of payments and the payout.</p><p><b>Cash and Foodie</b> savings run from <b>1 January to 30 November</b>. If you join after the season has started, you must first pay the contributions that fell due from 1 January up to the day you join. This catch-up is calculated automatically, is taken from your wallet together with the registration fee, and carries no penalty. <b>Groceries</b> plans run from the day you join, for the number of payments shown on the plan.</p><p><b>Plan codes.</b> Every Groceries plan you join gets its own plan code. The admin chooses the day the codes come out and their last day. While a code is usable it can be entered when joining a new Groceries plan, by you or by anyone you share it with. Each code works <b>once only</b>; a code that is not used in time is marked as expired. Cash and Foodie plans do not have plan codes, and a plan code cannot be used to join them.</p>`)
+    + S(5, 'Automatic payments, deadlines and late penalties', `<p>You do not pay each contribution by hand. At the start of each payment period your plan's contribution is taken from your wallet automatically. If you have several plans and your wallet cannot cover them all, plans are served from the oldest deadline first; a plan that cannot be covered <b>waits</b> and is paid automatically as soon as you top up.</p><p>All deadlines use Lagos time (WAT). On Cash and Foodie plans, daily plans are due before <b>${RULES.cutoffHour}:00 noon</b> each day, weekly plans by <b>Friday ${RULES.cutoffHour}:00 noon</b>, and monthly plans by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>.</p><p>On <b>Groceries</b> plans, your first payment is taken on the day you join, together with the joining fee. After that, payments fall every day (daily plans), every 7 days (weekly plans) or on the same date every month (monthly plans), counted from the day you join, and each is due before <b>${RULES.cutoffHour}:00 noon</b> on its due day.</p><p>A contribution that is still unpaid after its deadline costs double when it is collected (for example ${naira(100)} becomes ${naira(100 * m)}). The extra amount is a penalty: it does not count towards your savings or payout. Keep enough in your wallet to avoid it.</p>`)
     + S(6, 'The t-shirt fee', `<p>Every member pays a one-time fee of <b>${naira(FEES.shirt)}</b> for the Nobles Groceries t-shirt, taken from the wallet. You can use your dashboard, join plans and make contributions without paying it. It only becomes payable <b>when you want to request a payout</b>. It is paid once only.</p>`)
-    + S(7, 'Payouts and the clearance fee', `<p>You can request a payout from a plan only when <b>all</b> of the following are true:</p><ul class="list-disc pl-5 space-y-1"><li>the plan is fully paid and its saving period has ended;</li><li><b>you have another plan actively running</b>: a plan you have joined, other than the one you are collecting, whose saving period has not yet ended. If you have none, you must join a new plan before you can request the payout;</li><li>you have paid the one-time ${naira(FEES.shirt)} t-shirt fee (see section 6).</li></ul><p>Every payout request also carries a clearance fee of <b>${naira(FEES.clearance)}</b>, taken from your wallet. Your request is sent as soon as it is paid.</p>`)
+    + S(7, 'Payouts and the clearance fee', `<p>You can request a payout from a plan only when <b>all</b> of the following are true:</p><ul class="list-disc pl-5 space-y-1"><li>the plan is fully paid and its saving period has ended (Groceries plans show the day their payout opens);</li><li><b>you have another plan that has been actively running for at least 2 weeks</b>: a plan you joined at least 14 days earlier, other than the one you are collecting, whose saving period has not yet ended. If you have none, you must join a new plan before you can request the payout;</li><li>you have paid the one-time ${naira(FEES.shirt)} t-shirt fee (see section 6);</li><li>your account name, bank, 10-digit account number and address are saved on your Profile. Payouts are paid into that account. Once saved, these details can only be changed by the admin.</li></ul><p>A clearance fee of <b>${naira(FEES.clearance)}</b> is taken from your wallet for each plan, once per plan, as soon as all its payments are complete. If a payout request is turned down, you can request it again without paying the clearance fee twice.</p>`)
     + S(8, 'Records', `<p>Every top-up, fee and contribution is recorded in your wallet history on your dashboard, and you can see every payment and payout there.</p>`)
     + S(9, 'Questions', `<p>For any question about these terms, contact customer support on <b>${SUPPORT_PHONE}</b>.</p>`)
     + '</div>';
@@ -205,13 +294,211 @@ const rulesHTML = () => {
     + c('Paid from your wallet', `You never pay a contribution by hand. When a payment period opens, the contribution is taken from your wallet. Keep your wallet topped up and your plans run by themselves.`)
     + c('Not enough in the wallet?', `If you have, say, three plans of ${naira(2000)} a day and ${naira(5000)} in your wallet, two plans are paid and the third <b>waits</b>. The moment you top up, it is paid automatically.`)
     + c('Daily plans', `Taken at the start of each day and due before <b>${RULES.cutoffHour}:00 noon</b>. Still unpaid after noon, it costs double: ${naira(100)} becomes ${naira(100 * m)}.`)
-    + c('Weekly plans', `Taken from Monday and due by <b>Friday ${RULES.cutoffHour}:00 noon</b>. After that the week's payment is doubled.`)
-    + c('Monthly plans', `Each month's payment is due by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>. After that it is doubled.`)
+    + c('Weekly plans (Cash and Foodie)', `Taken from Monday and due by <b>Friday ${RULES.cutoffHour}:00 noon</b>. After that the week's payment is doubled.`)
+    + c('Monthly plans (Cash and Foodie)', `Each month's payment is due by the <b>${RULES.monthlyGraceDay}nd day of the following month</b>. After that it is doubled.`)
     + c('Late penalty', `Every unpaid contribution carries its own penalty once its deadline has passed. A penalty is a fee: it does not count towards your savings or payout.`)
     + c('Joining mid-season', `Cash and Foodie plans run from 1 January to 30 November. If you join in March, the contributions from January up to the day you join are worked out for you and taken from your wallet with the joining fee, with no penalty.`)
-    + c('Your first payment (Groceries)', `Daily: today before noon if you join before noon, otherwise tomorrow before noon. Weekly: the coming Friday noon (or the one after, if it has passed). Monthly: the 2nd of next month.`)
-    + c('Time and confirmation', `All deadlines use Lagos time (WAT), whatever your device clock says. Transfers into your account number are confirmed automatically in real time.`) + '</div>';
+    + c('Your first payment (Groceries)', `Taken on the day you join, together with the ${naira(FEES.join)} joining fee. After that: every day (daily), every 7 days (weekly) or on the same date every month (monthly), counted from the day you join, each due before ${RULES.cutoffHour}:00 noon.`)
+    + c('Time and confirmation', `All deadlines use Lagos time (WAT), whatever your device clock says. Top-ups are made by bank transfer with a receipt: credited at once, then confirmed by the admin.`) + '</div>';
 };
+
+
+// ===== payout details (kept on the member's profile, used for every payout request) =====
+const NG_BANKS = ['Access Bank', 'Citibank', 'Ecobank', 'Fidelity Bank', 'First Bank of Nigeria', 'First City Monument Bank (FCMB)', 'Globus Bank', 'Guaranty Trust Bank (GTBank)', 'Heritage Bank', 'Jaiz Bank', 'Keystone Bank', 'Kuda Bank', 'Lotus Bank', 'Moniepoint MFB', 'OPay', 'PalmPay', 'Parallex Bank', 'Polaris Bank', 'Providus Bank', 'Stanbic IBTC Bank', 'Standard Chartered', 'Sterling Bank', 'SunTrust Bank', 'Taj Bank', 'Titan Trust Bank', 'Union Bank', 'United Bank for Africa (UBA)', 'Unity Bank', 'VFD Microfinance Bank', 'Wema Bank (ALAT)', 'Zenith Bank'];
+const payoutReady = u => !!(u && u.bank_account_name && u.bank_name && /^\d{10}$/.test(u.bank_account_number || '') && u.address);
+// the details block shown to members (payout pop-up) and admins (payouts, member page)
+const payoutDetails = u => payoutReady(u) ? `<dl class="text-sm divide-y">${[['Account name', u.bank_account_name], ['Bank', u.bank_name], ['Account number', '<span class="font-mono tracking-wider">' + esc(u.bank_account_number) + '</span>'], ['Address', u.address]].map(([k, v]) => `<div class="flex justify-between gap-4 py-1.5"><dt class="text-slate-500 shrink-0">${k}</dt><dd class="font-medium text-slate-900 text-right break-words min-w-0">${k === 'Account number' ? v : esc(v)}</dd></div>`).join('')}</dl>` : '<p class="text-sm text-amber-800">No payout details on the profile yet.</p>';
+
+// ===== plan groups =====
+// Joining the same plan several times at once makes one group, shown as one card. Each membership in it still has its own
+// payments and its own plan code. groupSubs(list) -> [{ key, lead, holder (first with a code), members, n }]
+function groupSubs(list) {
+  const map = new Map();
+  list.forEach(x => { const k = x.group_id || x.id; if (!map.has(k)) map.set(k, []); map.get(k).push(x); });
+  return [...map.entries()].map(([key, members]) => {
+    const lead = members.find(m => m.group_lead) || members[0];
+    return { key, lead, holder: members.find(m => m.code) || lead, members, n: members.length };
+  });
+}
+const codeCount = sub => 1;   // every plan has its own code, and a code joins one plan
+
+// ===== plan codes (display) =====
+// where a membership's code stands right now: none | soon | open | used | expired
+// (an admin can mark a code as used or expired: code_admin; a code actually used by a member always shows as used)
+const codeStatus = (sub, now = Date.now()) => !sub.code ? 'none' : sub.code_used_at ? 'used' : sub.code_admin === 'used' || sub.code_admin === 'expired' ? sub.code_admin : now >= parseTs(sub.code_until).getTime() ? 'expired' : now < parseTs(sub.code_from).getTime() ? 'soon' : 'open';
+const codePending = sub => String(sub.code_from || '').slice(0, 4) >= '2999';            // the admin has not set the plan's code dates yet
+const noLastDay = sub => String(sub.code_until || '').slice(0, 4) >= '2999';
+const lastDay = sub => noLastDay(sub) ? 'its last day (to be announced)' : fmtDay(new Date(parseTs(sub.code_until).getTime() - 1));            // code_until is the first moment after the last valid day
+const codeRange = sub => codePending(sub) ? 'Date to be announced' : fmtDay(parseTs(sub.code_from)) + ' – ' + (noLastDay(sub) ? 'no last day yet' : lastDay(sub));
+const opensOn = sub => codePending(sub) ? 'a date the admin will announce' : fmtDay(parseTs(sub.code_from));
+const codeBadge = sub => ({ soon: '<span class="inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ring-inset bg-slate-50 text-slate-600 ring-slate-200">Not open yet</span>', open: '<span class="inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ring-inset bg-emerald-50 text-emerald-800 ring-emerald-200">Usable</span>', used: '<span class="inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ring-inset bg-blue-50 text-blue-700 ring-blue-200">Used</span>', expired: '<span class="inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ring-inset bg-red-50 text-red-700 ring-red-200">Expired</span>' })[codeStatus(sub)] || '<span class="text-slate-400">—</span>';
+// the code panel shown on a member's plan card
+function codePanel(sub) {
+  const st = codeStatus(sub); if (st === 'none') return '';
+  const code = `<span class="font-mono font-semibold tracking-wider ${st === 'expired' || st === 'used' ? 'line-through text-slate-400' : 'text-slate-900'}">${esc(sub.code)}</span>`;
+  const body = {
+    soon: `<div class="flex flex-wrap items-center gap-3">${code}${codeBadge(sub)}</div><p class="text-xs text-slate-500 mt-1.5">${codePending(sub) ? 'Your plan code comes out on a date the admin will announce.' : `Your plan code opens on <b class="text-slate-700">${opensOn(sub)}</b> and can be used until the end of <b class="text-slate-700">${lastDay(sub)}</b>.`} It can only be used to join a Grocery plan.</p>`,
+    open: `<div class="flex flex-wrap items-center gap-3">${code}<button type="button" onclick="copyCode('${esc(sub.code)}')" class="${btn2} !py-1 !px-2.5 text-xs">Copy</button></div><p class="text-xs text-slate-500 mt-1.5">Use it (or share it) when joining a new Grocery plan, before the end of <b class="text-slate-700">${lastDay(sub)}</b>. It works once${codeCount(sub) > 1 ? ` and carries <b class="text-slate-700">${codeCount(sub)} plans</b>: whoever uses it joins ${codeCount(sub)} plans at once` : ''}.</p>`,
+    used: `<div class="flex flex-wrap items-center gap-3">${code}${codeBadge(sub)}</div><p class="text-xs text-slate-500 mt-1.5">${sub.code_used_at ? `Used by <b class="text-slate-700">${esc(sub.code_used_name || 'a member')}</b> on ${date(sub.code_used_at)}.${sub.code_used_sub ? `<span data-ref="${esc(sub.code_used_sub)}"></span>` : ''}` : `Marked as used by the admin on ${date(sub.code_admin_at)}.`}</p>`,
+    expired: `<div class="flex flex-wrap items-center gap-3">${code}${codeBadge(sub)}</div><p class="text-xs text-slate-500 mt-1.5">${sub.code_admin === 'expired' ? `Marked as expired by the admin on ${date(sub.code_admin_at)}.` : `Expired at the end of ${lastDay(sub)} without being used.`}</p>`,
+  }[st];
+  return `<div class="mt-4 rounded-lg border ${st === 'open' ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50'} p-3"><p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">Plan code</p>${body}</div>`;
+}
+// the plan codes of a group card: one per plan, with status and Copy for the usable ones
+function groupCodes(members) {
+  const L = members.filter(m => m.code); if (!L.length) return '';
+  if (L.length === 1) return codePanel(L[0]);
+  const open = L.filter(m => codeStatus(m) === 'open').length;
+  return `<details data-ccbox class="mt-4 rounded-lg border ${open ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50'} p-3"><summary class="cursor-pointer text-sm"><span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Plan codes</span> <span class="text-slate-700">${L.length} codes, one per plan${open ? ` · <b class="text-emerald-800">${open} usable now</b>` : ''}</span></summary>
+    ${open > 1 ? `<div class="flex flex-wrap items-center gap-2 mt-2 text-xs"><label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" data-ccall onchange="tickAll(this,this.checked)" class="w-4 h-4 rounded accent-emerald-700">Select all</label><span data-ccn style="color:#64748b">None selected</span><button type="button" onclick="copyTicked(this)" class="${btn2} !py-1 !px-2.5 text-xs">Copy selected</button><button type="button" onclick="copyAllIn(this)" class="${btn2} !py-1 !px-2.5 text-xs">Copy all ${open} usable</button></div>` : ''}
+    <div class="mt-2 max-h-56 overflow-y-auto divide-y border rounded-lg bg-white">${L.map(m => `<div class="flex flex-wrap items-center gap-2 px-3 py-1.5">${open > 1 && codeStatus(m) === 'open' ? `<input type="checkbox" data-cc="${esc(m.code)}" aria-label="Select ${esc(m.code)}" class="w-4 h-4 rounded accent-emerald-700">` : ''}<span class="font-mono text-sm font-semibold tracking-wider ${codeStatus(m) === 'open' ? 'text-slate-900' : 'text-slate-400'}">${esc(m.code)}</span>${codeBadge(m)}${codeStatus(m) === 'open' ? `<button type="button" onclick="copyCode('${esc(m.code)}')" class="ml-auto ${btn2} !py-0.5 !px-2 text-xs">Copy</button>` : m.code_used_at ? `<span class="ml-auto text-xs text-slate-500">by ${esc(m.code_used_name || 'a member')}</span>` : ''}${m.code_used_sub ? `<span class="w-full" data-ref="${esc(m.code_used_sub)}"></span>` : ''}</div>`).join('')}</div>
+    <p class="text-xs text-slate-500 mt-1.5">Each code works once and joins one plan. ${L[0] && codeStatus(L[0]) === 'soon' ? 'They open on ' + opensOn(L[0]) + '.' : 'Usable until the end of ' + lastDay(L[0]) + '.'}</p></details>`;
+}
+// How a plan joined with a plan code is going (status, payments so far). Put <span data-ref="ID"></span> anywhere (ID = the code's
+// code_used_sub); this fills it in, a batch at a time, through /api/noble/code/referred.
+const REF = {};
+const refLine = r => !r ? '' : r.gone ? '<span class="text-slate-400">That plan no longer exists.</span>'
+  : `${esc(r.plan)} · <b class="${r.status === 'active' ? 'text-emerald-800' : 'text-slate-700'}">${r.status === 'active' ? 'Running' : r.status === 'completed' ? 'Completed' : 'Cancelled'}</b> · <b class="text-slate-700">${r.paid} of ${r.total}</b> payment${r.total === 1 ? '' : 's'} made${r.overdue ? ` · <span class="text-red-600">${r.overdue} overdue</span>` : ''}${r.next && !r.overdue ? ` · next due ${fmtDay(new Date(r.next))}` : ''}`;
+(() => {
+  if (typeof MutationObserver === 'undefined') return;
+  let t = null;
+  const paint = () => document.querySelectorAll('[data-ref]').forEach(el => { const r = REF[el.dataset.ref]; if (r !== undefined && !el.dataset.refDone) { el.dataset.refDone = 1; el.innerHTML = r ? '<span class="block text-xs text-slate-500 mt-0.5">' + refLine(r) + '</span>' : ''; } });
+  const run = async () => {
+    t = null; paint();
+    const need = [...new Set([...document.querySelectorAll('[data-ref]:not([data-ref-done])')].map(el => el.dataset.ref))].filter(id => id && REF[id] === undefined);
+    for (let i = 0; i < need.length; i += 100) {
+      const ids = need.slice(i, i + 100);
+      try { const r = await pb.send('/api/noble/code/referred?ids=' + encodeURIComponent(ids.join(',')), { method: 'GET' }); ids.forEach(id => REF[id] = r[id] || null); }
+      catch (_) { ids.forEach(id => REF[id] = null); }
+    }
+    paint();
+  };
+  addEventListener('hashchange', () => { Object.keys(REF).forEach(k => delete REF[k]); }, true);
+  const start = () => new MutationObserver(() => { if (!t && document.querySelector('[data-ref]:not([data-ref-done])')) t = setTimeout(run, 60); }).observe(document.body, { childList: true, subtree: true });
+  document.body ? start() : addEventListener('DOMContentLoaded', start);
+})();
+// a live change to a plan makes its line fetch again next time it is drawn
+const refForget = id => { delete REF[id]; };
+// copy text, with a fallback for browsers that block the clipboard API
+const copyText = t => (navigator.clipboard?.writeText ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => {
+  const a = document.createElement('textarea'); a.value = t; a.setAttribute('readonly', ''); a.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(a); a.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (_) { } a.remove(); if (!ok) throw new Error('copy');
+});
+// Plan codes to pick from, grouped by the card they come from (plans joined together), oldest card first, each code numbered
+// within its card: "Ultimate plan × 10 · joined 12 Nov 2026" then "#1 JJ-… until …". attr: the tick box attribute (data-code,
+// data-pc). Each card has its own "select this card" box (data-gall), wired below for every list on the page.
+function codeGroupsHTML(list, attr, small = false) {
+  const t = x => parseTs(x.created).getTime(), G = new Map();
+  [...list].sort((a, b) => t(a) - t(b)).forEach(x => { const k = x.group_id || ('one:' + x.id); if (!G.has(k)) G.set(k, []); G.get(k).push(x); });
+  let n = 0;
+  return [...G.values()].map(g => { n++; const f = g[0], nm = esc(f.expand?.plan?.name || 'Plan'), size = f.group_size > 1 ? f.group_size : g.length;
+    return `<div data-gbox class="border-b last:border-b-0"><label class="sticky top-0 z-[1] flex items-center gap-2 px-3 py-1.5 bg-slate-50 border-b text-xs cursor-pointer"><input type="checkbox" data-gall class="w-4 h-4 rounded accent-emerald-700"><span class="min-w-0"><span class="block font-semibold text-slate-800">Card ${n}: ${nm}${size > 1 ? ' × ' + size : ''}</span><span class="block text-slate-500">Joined ${date(f.created)} · ${g.length} usable code${g.length === 1 ? '' : 's'} · select all</span></span></label>`
+      + g.map((x, i) => `<label class="flex items-center gap-2 px-3 ${small ? 'py-1' : 'py-1.5'} cursor-pointer hover:bg-slate-50 ${small ? 'text-xs' : 'text-sm'}"><input type="checkbox" ${attr}="${esc(x.code)}" class="w-4 h-4 rounded accent-emerald-700"><span class="w-7 shrink-0 text-xs text-slate-400">#${i + 1}</span><span class="font-mono font-semibold tracking-wider text-slate-900 whitespace-nowrap">${esc(x.code)}</span><span class="text-xs text-slate-500 truncate">${noLastDay(x) ? 'no last day yet' : 'until ' + lastDay(x)}</span></label>`).join('') + '</div>'; }).join('');
+}
+window.codeGroupsHTML = codeGroupsHTML;
+document.addEventListener('change', e => {
+  if (e.target.matches && e.target.matches('[data-gall]')) {   // tick / untick every code of that card
+    const box = e.target.closest('[data-gbox]'), on = e.target.checked; window._gbulk = true;
+    try { box.querySelectorAll('input[type=checkbox]:not([data-gall])').forEach(b => { if (b.checked !== on) { b.checked = on; b.dispatchEvent(new Event('change', { bubbles: true })); } }); }
+    finally { window._gbulk = false; e.target.checked = on; e.target.indeterminate = false; }
+  } else if (!window._gbulk && e.target.closest && e.target.closest('[data-gbox]') && e.target.type === 'checkbox') {   // keep the card's box in step
+    const box = e.target.closest('[data-gbox]'), all = [...box.querySelectorAll('input[type=checkbox]:not([data-gall])')], k = all.filter(b => b.checked).length, g = box.querySelector('[data-gall]');
+    if (g) { g.checked = k === all.length; g.indeterminate = k > 0 && k < all.length; }
+  }
+});
+window.copyCode = c => copyText(c).then(() => toast('Code copied: ' + c), () => toast(c));
+// several codes at once, one per line (easy to paste into WhatsApp or the "plan codes" box)
+window.copyCodes = list => { list = [...new Set((list || []).filter(Boolean))]; if (!list.length) return toast('No codes to copy. Tick some first.', 1);
+  copyText(list.join('\n')).then(() => toast(list.length + ' code' + (list.length === 1 ? '' : 's') + ' copied.'), () => toast('Could not copy. Your codes: ' + list.join(' '), 1, 12000)); };
+// tick boxes: <input type="checkbox" data-cc="CODE"> inside a box marked data-ccbox; these copy the ticked ones / all of them
+// Tables are drawn twice (a table for wide screens, cards for phones), so every code has two tick boxes: count each code once.
+const ccTicked = box => { const m = new Map(); box.querySelectorAll('[data-cc]:checked').forEach(b => { if (!m.has(b.dataset.cc)) m.set(b.dataset.cc, b.dataset.sid || ''); }); return [...m].map(([cc, sid]) => ({ cc, sid })); };
+const ccAllCodes = box => [...new Set([...box.querySelectorAll('[data-cc]')].map(b => b.dataset.cc))];
+window.ccTicked = ccTicked;
+window.copyTicked = el => copyCodes(ccTicked(el.closest('[data-ccbox]')).map(x => x.cc));
+window.copyAllIn = el => copyCodes(ccAllCodes(el.closest('[data-ccbox]')));
+window.tickAll = (el, on) => { el.closest('[data-ccbox]').querySelectorAll('[data-cc]').forEach(b => { b.checked = on; }); ccCount(el.closest('[data-ccbox]')); };
+// "N selected" counter: any <span data-ccn> inside a data-ccbox shows how many of its codes are ticked (and keeps Select all in step)
+const ccCount = box => { if (!box) return;
+  if (box.dataset.all === '1') { const t = (+box.dataset.total || 0).toLocaleString(); box.querySelectorAll('[data-ccn]').forEach(el => { el.textContent = 'All ' + t + ' selected (every page)'; el.style.fontWeight = '600'; el.style.color = ''; }); box.querySelectorAll('[data-cc]').forEach(b => { b.checked = true; }); box.querySelectorAll('[data-ccall]').forEach(el => { el.checked = true; el.indeterminate = false; }); return; }
+  const all = ccAllCodes(box), n = ccTicked(box).length;
+  box.querySelectorAll('[data-ccn]').forEach(el => { el.textContent = n ? n + ' of ' + all.length + ' selected' : 'None selected'; el.style.fontWeight = n ? '600' : ''; el.style.color = n ? '' : '#64748b'; });
+  box.querySelectorAll('[data-ccall]').forEach(el => { el.checked = all.length > 0 && n === all.length; el.indeterminate = n > 0 && n < all.length; }); };
+document.addEventListener('change', e => { if (e.target.matches && e.target.matches('[data-cc]')) { const box = e.target.closest('[data-ccbox]');
+  if (box) box.querySelectorAll('[data-cc]').forEach(b => { if (b !== e.target && b.dataset.cc === e.target.dataset.cc) b.checked = e.target.checked; });   // keep the twin in step
+  ccCount(box); } });
+// a table page change or a re-draw replaces the rows: recount (cheap, at most every 150 ms)
+(() => { if (typeof MutationObserver === 'undefined') return; let t = null;
+  const go = () => { t = null; document.querySelectorAll('[data-ccbox]').forEach(b => { if (b.querySelector('[data-ccn]')) ccCount(b); }); };
+  const start = () => new MutationObserver(() => { if (!t) t = setTimeout(go, 150); }).observe(document.body, { childList: true, subtree: true });
+  document.body ? start() : addEventListener('DOMContentLoaded', start); })();
+
+// ===== deposits by bank transfer with a receipt (pb_hooks/transfers.js) =====
+// Online payment partners (Flutterwave, Paystack, Monnify) are paused. The member transfers the amount + the ₦100 charge to the
+// company's account and uploads the receipt; the server reads it and credits the wallet at once when everything matches,
+// otherwise an admin checks it (Admin > Receipts).
+const GATEWAY_NAME = { flutterwave: 'Flutterwave', paystack: 'Paystack', monnify: 'Monnify', transfer: 'Bank transfer' };
+let _tinfo = null, _tinfoAt = 0;
+const transferInfo = async () => { if (!_tinfo || Date.now() - _tinfoAt > 60000) { _tinfo = await pb.send('/api/noble/transfer/info', { method: 'GET' }); _tinfoAt = Date.now(); } return _tinfo; };
+// large photos are made smaller before upload (max 1800 px, JPEG), so they upload fast on mobile data; PDFs are sent as they are
+async function shrinkImage(file) {
+  if (!file || !/^image\/(jpeg|png|webp|gif)$/.test(file.type) || (file.size < 1.2e6 && /^image\/(jpeg|png)$/.test(file.type))) return file;   // small JPG/PNG as they are; WebP/GIF always become JPEG
+  try {
+    const img = await createImageBitmap(file), k = Math.min(1, 1800 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const b = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.88));
+    return b ? new File([b], file.name.replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
+  } catch (_) { return file; }
+}
+window.copyText = (t, label) => navigator.clipboard?.writeText(String(t)).then(() => toast((label || 'Copied') + ': ' + t), () => toast(String(t)));
+// the "you pay" summary under an amount box
+const depositSummary = a => { a = Math.max(0, Math.round(+a || 0)); return `<div class="flex justify-between py-1"><span class="text-slate-500">Into your wallet</span><span class="font-medium">${naira(a)}</span></div><div class="flex justify-between py-1"><span class="text-slate-500">Charge</span><span class="font-medium">${naira(FEES.tax)}</span></div><div class="flex justify-between py-1.5 border-t mt-1 text-base"><span class="font-semibold text-slate-900">Transfer exactly</span><span class="font-semibold text-slate-900">${naira(a + FEES.tax)}</span></div>`; };
+// the account box (bank, account number with Copy, account name)
+const accountBox = (I, total) => `<div class="rounded-lg border bg-white divide-y text-sm">
+  <div class="flex items-center justify-between gap-3 px-3 py-2"><span class="text-slate-500">Bank</span><span class="font-medium text-slate-900 text-right">${esc(I.bank_name || '—')}</span></div>
+  <div class="flex items-center justify-between gap-3 px-3 py-2"><span class="text-slate-500">Account number</span><span class="flex items-center gap-2"><span class="font-mono text-base font-semibold tracking-wider text-slate-900">${esc(I.account_number)}</span><button type="button" onclick="copyText('${esc(I.account_number)}','Account number copied')" class="${btn2} !py-1 !px-2.5 text-xs">Copy</button></span></div>
+  <div class="flex items-center justify-between gap-3 px-3 py-2"><span class="text-slate-500">Account name</span><span class="font-medium text-slate-900 text-right">${esc(I.account_name || '—')}</span></div>
+  ${total != null ? `<div class="flex items-center justify-between gap-3 px-3 py-2 bg-amber-50"><span class="text-amber-900">Amount to transfer</span><span class="flex items-center gap-2"><span id="tamt" class="font-semibold text-amber-900">${naira(total)}</span><button type="button" onclick="copyText(document.getElementById('tamt').dataset.v||'${total}','Amount copied')" class="${btn2} !py-1 !px-2.5 text-xs">Copy</button></span></div>` : ''}</div>`;
+// The deposit window: amount, where to pay, then the receipt. Used from the Wallet page and whenever the wallet is short.
+async function transferBox(amount = '') {
+  let I; try { I = await transferInfo(); } catch (x) { return toast(x.message, 1); }
+  if (!I.account_number) return toast('Deposits are not open yet. Please contact customer care.', 1, 6000);
+  const a0 = Math.max(0, Math.round(+amount || 0));
+  modal('Deposit by bank transfer',
+    `<div class="text-sm"><p class="font-semibold text-slate-900">1. How much do you want in your wallet?</p><input name="amount" type="number" min="${I.min || 100}" step="1" value="${a0 || ''}" required placeholder="e.g. 5000" class="${inp} mt-1 text-lg"><div id="dsum" class="text-sm rounded-lg border bg-slate-50 px-3 py-2 mt-2">${depositSummary(a0)}</div></div>`
+    + `<div class="text-sm"><p class="font-semibold text-slate-900 mb-1">2. Transfer to this account</p>${accountBox(I, a0 + FEES.tax)}<p class="text-xs text-slate-500 mt-1">Transfer the <b>exact amount</b> shown, including the ${naira(FEES.tax)} charge. ${esc(I.transfer_note || '')}</p></div>`
+    + `<div class="text-sm space-y-2"><p class="font-semibold text-slate-900">3. Upload your receipt</p><label class="block"><span class="text-slate-600">Name on the account you paid from</span><input name="sender_name" required autocomplete="name" value="${esc(pb.authStore.record?.name || '')}" class="${inp} mt-1"></label><label class="block"><span class="text-slate-600">Receipt (screenshot, photo or PDF)</span><input name="receipt" type="file" required accept="image/*,application/pdf" class="mt-1 block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium"></label><p class="text-xs text-slate-500">The receipt must show the amount, our account number, the date and the transaction reference. ${I.auto ? 'Your wallet is credited as soon as you submit. The admin then confirms the payment with the bank; if the money never arrived, the amount is taken back.' : 'An admin checks it and credits your wallet.'}</p></div>`,
+    async d => {
+      const amt = Math.round(+d.amount || 0);
+      if (amt < (I.min || 100)) throw new Error('The smallest deposit is ' + naira(I.min || 100) + '.');
+      if (!d.receipt || !d.receipt.size) throw new Error('Choose your receipt file.');
+      const sub = document.querySelector('[data-ui="modal"] button:not([type])'); if (sub) { sub.disabled = true; sub.textContent = 'Checking your receipt…'; }
+      try {
+        const f = new FormData(); f.append('amount', String(amt)); f.append('sender_name', d.sender_name || ''); f.append('receipt', await shrinkImage(d.receipt));
+        const r = await pb.send('/api/noble/transfer', { method: 'POST', body: f });
+        if (r.status === 'successful') toast(r.message, 0, 7000);
+        else if (r.queued) toast(r.message, 0, 9000);
+        else setTimeout(() => confirmBox({ title: 'Receipt received', message: r.message, confirmText: 'OK', cancelText: 'Close' }), 50);
+      } catch (x) { if (sub) { sub.disabled = false; sub.textContent = 'Submit receipt'; } throw x; }
+    }, 'Submit receipt');
+  const M = document.querySelector('[data-ui="modal"]'), i = M.querySelector('[name="amount"]');
+  const upd = () => { const v = Math.max(0, Math.round(+i.value || 0)); $('#dsum').innerHTML = depositSummary(v); const t = $('#tamt'); if (t) { t.textContent = naira(v + FEES.tax); t.dataset.v = v + FEES.tax; } };
+  i.oninput = upd; upd(); if (!a0) i.focus();
+}
+// kept for the places that ask for a deposit when the wallet is short (joining, t-shirt, clearance)
+async function startDeposit(amount) { return transferBox(Math.max(0, Math.round(Number(amount) || 0))); }
+window.depositBox = (amount = '') => transferBox(amount);
+window.transferBox = transferBox;
+// where a transfer deposit stands, for members and admins
+const depBadge = d => {
+  if (d.gateway && d.gateway !== 'transfer' && (d.status === 'pending' || d.status === 'failed')) return '<span class="inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ring-inset bg-slate-50 text-slate-600 ring-slate-200">Not completed</span>';
+  const c = { pending: ['Waiting for approval', 'bg-amber-50 text-amber-800 ring-amber-200'], successful: d.verified === 'admin' ? ['Approved', 'bg-emerald-50 text-emerald-800 ring-emerald-200'] : ['Credited · under review', 'bg-amber-50 text-amber-800 ring-amber-200'], failed: ['Rejected', 'bg-red-50 text-red-700 ring-red-200'], reversed: ['Rejected · money withdrawn', 'bg-red-50 text-red-700 ring-red-200'] }[d.status] || [d.status, 'bg-slate-50 text-slate-600 ring-slate-200'];
+  return `<span class="inline-flex px-2 py-0.5 rounded-md text-xs font-medium ring-1 ring-inset ${c[1]}">${c[0]}</span>`;
+};
+// a protected receipt file needs a short-lived file token
+const receiptURL = async (d, thumb) => { const token = await pb.files.getToken(); return pb.files.getURL(d, d.receipt, Object.assign({ token }, thumb ? { thumb } : {})); };
+window.openReceipt = async (id) => { try { const d = await pb.collection('deposits').getOne(id); window.open(await receiptURL(d), '_blank', 'noopener'); } catch (x) { toast(x.message, 1); } };
 
 // Pays a fee (or joins a plan) from the member's wallet: the server decides the amount and checks the balance (see pb_hooks/wallet.js and fees.js).
 // body: { type: 'shirt' } | { type: 'join', plan } | { type: 'clearance', subscription, details }
@@ -226,9 +513,11 @@ function toast(m, err, ms = 3000) {
 }
 function guard(role) {
   if (!pb.authStore.isValid) { location.href = 'auth.html'; return false; }
+  if (pb.authStore.record.must_change_password) { location.href = 'auth.html?mode=change'; return false; }   // temporary password: choose your own first
   if (role === 'admin' && pb.authStore.record.role !== 'admin') { location.href = 'dashboard.html'; return false; }
   // re-check with the server: picks up role changes and deleted accounts, and renews the token
   pb.collection('users').authRefresh().then(() => {
+    if (pb.authStore.record.must_change_password) { location.href = 'auth.html?mode=change'; return; }
     if (role === 'admin' && pb.authStore.record.role !== 'admin') location.href = 'dashboard.html';
   }).catch(e => { if ([401, 403, 404].includes(e.status)) { pb.authStore.clear(); location.href = 'auth.html'; } });
   return true;
@@ -249,6 +538,29 @@ const table = (heads, rows) => {
   }).join('')}</div>`;
   return desk + cards;
 };
+// ===== server-side paging: only one page of records is downloaded at a time =====
+// pagedTable(el, { col, heads, row, filter, sort, expand, per, key }) draws a table plus Previous/Next and re-draws only itself.
+// The page number survives live refreshes (window._pg[key]) and is forgotten when you move to another page of the app.
+const pgBtn = 'px-3 py-1.5 rounded-lg border bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white';
+async function pagedTable(el, o) {
+  const { col, heads, row, filter = '', sort = '-created', expand = '', per = 50, key = col, empty = '' } = o;
+  window._pg = window._pg || {};
+  let page = window._pg[key] || 1, r;
+  r = await pb.collection(col).getList(page, per, { filter, sort, ...(expand ? { expand } : {}) });
+  const pages = Math.max(1, Math.ceil(r.totalItems / per));
+  if (page > pages && r.totalItems) { window._pg[key] = pages; return pagedTable(el, o); }
+  const from = r.totalItems ? (page - 1) * per + 1 : 0, to = Math.min(page * per, r.totalItems);
+  el.innerHTML = (r.items.length || !empty ? table(heads, r.items.map(row)) : empty)
+    + (r.totalItems > per ? `<div class="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm text-slate-500"><span>Showing <b class="text-slate-700">${from.toLocaleString()}–${to.toLocaleString()}</b> of <b class="text-slate-700">${r.totalItems.toLocaleString()}</b></span><span class="flex items-center gap-2"><button data-pg="${page - 1}" ${page > 1 ? '' : 'disabled'} class="${pgBtn}">← Previous</button><span>Page ${page} of ${pages.toLocaleString()}</span><button data-pg="${page + 1}" ${page < pages ? '' : 'disabled'} class="${pgBtn}">Next →</button></span></div>` : '');
+  el.querySelectorAll('[data-pg]').forEach(b => b.onclick = () => { window._pg[key] = +b.dataset.pg; pagedTable(el, o).then(() => el.scrollIntoView({ block: 'start', behavior: 'smooth' })); });
+  return r;
+}
+// a search box that re-runs fn (debounced) without re-drawing the whole page, so typing is never interrupted
+const searchBox = (id, val, ph) => `<div class="relative flex-1 min-w-[220px]"><span class="absolute left-3 top-2.5 text-slate-400">${ic(IC.search)}</span><input id="${id}" value="${esc(val || '')}" placeholder="${ph}" class="${inp} pl-10"></div>`;
+const onSearch = (id, fn) => { let t; const el = $('#' + id); if (el) el.oninput = () => { clearTimeout(t); t = setTimeout(() => fn(el.value.trim()), 350); }; };
+// Lagos calendar day "YYYY-MM-DD" -> database timestamp of its first moment (for date filters)
+const dayStartTs = iso => { const [y, m, d] = iso.split('-').map(Number); return fromL(y, m - 1, d).toISOString().replace('T', ' '); };
+
 const fld = (label, name, val = '', type = 'text', extra = '') => `<label class="block text-sm"><span class="text-slate-600">${label}</span><input name="${name}" type="${type}" value="${esc(val)}" ${extra} class="${inp} mt-1"></label>`;
 const sel = (label, name, opts, val) => `<label class="block text-sm"><span class="text-slate-600">${label}</span><select name="${name}" class="${inp} mt-1">${opts.map(o => `<option ${o == val ? 'selected' : ''}>${o}</option>`).join('')}</select></label>`;
 
@@ -257,10 +569,14 @@ function modal(title, body, onSubmit, cta = 'Save') {
   d.className = 'fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4'; d.setAttribute('data-ui', 'modal');
   d.innerHTML = `<form class="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-3 max-h-[90dvh] overflow-y-auto"><h3 class="font-semibold text-slate-900">${title}</h3>${body}<div class="flex justify-end gap-2 pt-2"><button type="button" class="c ${btn2}">Cancel</button><button class="${btn}">${cta}</button></div></form>`;
   document.body.appendChild(d);
-  $('.c', d).onclick = () => d.remove();
+  const close = () => { removeEventListener('keydown', esc, true); d.remove(); };
+  const esc = e => { if (e.key === 'Escape' && document.body.contains(d)) { e.stopPropagation(); close(); } };
+  addEventListener('keydown', esc, true);
+  d.onclick = e => { if (e.target === d) close(); };                     // click outside the box closes it
+  $('.c', d).onclick = close;
   $('form', d).onsubmit = async e => {
     e.preventDefault();
-    try { await onSubmit(Object.fromEntries(new FormData(e.target))); d.remove(); refresh(); }
+    try { await onSubmit(Object.fromEntries(new FormData(e.target))); close(); refresh(); }
     catch (x) { toast(x.message, 1); }
   };
 }
@@ -339,7 +655,7 @@ window.openPlan = i => {
     <div class="h-16 px-5 border-b flex items-center justify-between shrink-0"><div class="flex items-center gap-2"><button onclick="openPlan(${i - 1})" ${i ? '' : 'disabled'} class="${dBtn}" aria-label="Previous plan">‹</button><button onclick="openPlan(${i + 1})" ${i < L.length - 1 ? '' : 'disabled'} class="${dBtn}" aria-label="Next plan">›</button><span class="ml-1 text-sm text-slate-500">Plan ${i + 1} of ${L.length}</span></div><button onclick="closePlan()" class="${dBtn}" aria-label="Close">✕</button></div>
     <div class="flex-1 overflow-y-auto p-6"><p class="text-xs font-medium uppercase tracking-wide text-slate-500">${p.category} · ${p.frequency}</p><h2 class="text-xl font-semibold text-slate-900 mt-1">${esc(p.name)}</h2>
       <p class="mt-4 text-3xl font-semibold">${naira(p.amount)}<span class="text-base font-normal text-slate-500"> / ${FQ[p.frequency]}</span></p>
-      <dl class="mt-5 divide-y border-y">${row('Saving period', monthsLabel(p))}${row('Number of payments', nPay(p))}${row('Total you contribute', naira(totalOf(p)))}${row('Total payout', naira(payoutOf(p)))}${row('Status', p.active === false ? 'Hidden' : 'Open for enrolment')}</dl>
+      <dl class="mt-5 divide-y border-y">${row('Saving period', monthsLabel(p))}${hasCodes(p) ? row('Plan codes usable', codeDays(p)) : ''}${row('Number of payments', nPay(p))}${row('Total you contribute', naira(totalOf(p)))}${row('Total payout', naira(payoutOf(p)))}${row('Status', p.active === false ? 'Hidden' : 'Open for enrolment')}</dl>
       ${p.description ? `<h3 class="mt-6 text-sm font-semibold">What's included</h3><p class="mt-2 text-sm text-slate-600 leading-relaxed">${esc(p.description)}</p>` : ''}
       <div class="mt-8 flex gap-2">${nb(i - 1, '← Previous')}${nb(i + 1, 'Next →')}</div></div>
     <div class="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t shrink-0">${(window.PLAN_ACTION || (() => ''))(p)}</div></aside>`;
@@ -347,7 +663,9 @@ window.openPlan = i => {
 };
 
 // ===== app shell: sidebar, top bar with global plan search, keyboard shortcuts =====
-function layout({ brand, nav, views, alias = {}, support = false, badges = null, live = [], onLive = null, chip = null }) {
+// deps: { viewId: [collections it shows] }; a live change to any other collection does not re-draw that view. minGap: least ms between two re-draws.
+// search: { placeholder, run: async q => [{ label, sub, href }] } replaces the header's plan search (the admin panel uses it to find members)
+function layout({ brand, nav, views, alias = {}, support = false, badges = null, live = [], onLive = null, chip = null, deps = {}, minGap = 1500, search = null, livePill = false }) {
   const u = pb.authStore.record, ini = (u.name || u.email || '?').trim()[0].toUpperCase();
   $('#app').innerHTML = `<div class="min-h-screen lg:flex">
   <div id="ov" class="fixed inset-0 bg-slate-900/40 z-30 hidden lg:hidden"></div>
@@ -360,7 +678,7 @@ function layout({ brand, nav, views, alias = {}, support = false, badges = null,
     <header class="sticky top-0 z-20 h-16 bg-white/90 backdrop-blur border-b flex items-center gap-3 px-4 sm:px-8">
       <button id="mb" class="relative lg:hidden p-2 -ml-2 text-slate-600" aria-label="Menu">${ic(IC.menu)}<span id="mbd" class="hidden absolute top-1.5 right-1 w-2.5 h-2.5 rounded-full bg-red-600"></span></button>
       <span id="ttl" class="hidden md:block text-sm font-medium text-slate-900 w-44 shrink-0"></span>
-      <div class="relative flex-1 max-w-md"><span class="absolute left-3 top-2.5 text-slate-400">${ic(IC.search)}</span><input id="gs" autocomplete="off" placeholder="Jump to a plan…  ( / )" class="${inp} pl-10 bg-slate-50"><div id="gr" class="hidden absolute left-0 right-0 top-11 bg-white border rounded-xl shadow-lg overflow-hidden divide-y"></div></div>
+      <div class="relative flex-1 max-w-md"><span class="absolute left-3 top-2.5 text-slate-400">${ic(IC.search)}</span><input id="gs" autocomplete="off" placeholder="${esc(search?.placeholder || 'Jump to a plan…  ( / )')}" class="${inp} pl-10 bg-slate-50"><div id="gr" class="hidden absolute left-0 right-0 top-11 bg-white border rounded-xl shadow-lg overflow-hidden divide-y"></div></div>
       <div class="ml-auto flex items-center gap-3">${chip ? '<a href="#wallet" id="wchip" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border bg-white text-sm font-medium text-slate-700 hover:bg-slate-50" title="Your wallet"><span class="text-slate-500">Wallet</span><span id="wbal">…</span></a>' : ''}<button id="tg" onclick="toggleTheme()" class="p-2 rounded-lg text-slate-600 hover:bg-slate-100" aria-label="Switch between light and dark mode" title="Light / dark mode">${ic(document.documentElement.classList.contains('dark') ? IC.sun : IC.moon)}</button><div class="hidden sm:block text-right leading-tight"><p class="text-sm font-medium text-slate-900">${esc(u.name || u.email)}</p><p class="text-xs text-slate-500">${u.role === 'admin' ? 'Administrator' : 'Member'}</p></div><div class="w-9 h-9 rounded-full bg-emerald-800 text-white grid place-items-center text-sm font-semibold">${esc(ini)}</div></div>
     </header>
     <main id="main" class="p-4 pb-28 sm:p-8 sm:pb-10 max-w-6xl mx-auto"></main>
@@ -371,14 +689,25 @@ function layout({ brand, nav, views, alias = {}, support = false, badges = null,
   let ALL = null;
   const loadAll = async () => ALL || (ALL = (await pb.collection('plans').getFullList({ sort: 'category,frequency,amount' })).filter(p => u.role === 'admin' || p.active !== false));
   const gs = $('#gs'), gr = $('#gr');
-  gs.oninput = async () => {
+  let gt;
+  if (search) gs.oninput = () => {
+    clearTimeout(gt); const q = gs.value.trim(); if (!q) return gr.classList.add('hidden');
+    gt = setTimeout(async () => {
+      let m = []; try { m = await search.run(q); } catch (e) { }
+      if (gs.value.trim() !== q) return;
+      gr.innerHTML = m.length ? m.map(x => `<a href="${x.href}" class="block px-4 py-2.5 hover:bg-slate-50 text-sm"><span class="block font-medium text-slate-900 truncate">${esc(x.label)}</span>${x.sub ? `<span class="block text-xs text-slate-500 truncate">${esc(x.sub)}</span>` : ''}</a>`).join('') : '<p class="px-4 py-3 text-sm text-slate-500">No matches</p>';
+      gr.classList.remove('hidden');
+      gr.querySelectorAll('a').forEach(a => a.onclick = () => { gr.classList.add('hidden'); gs.value = ''; });
+    }, 300);
+  };
+  else gs.oninput = async () => {
     const q = gs.value.trim(); if (!q) return gr.classList.add('hidden');
     const all = await loadAll(), m = all.filter(p => matchQ(p, q)).slice(0, 8);
     gr.innerHTML = m.length ? m.map(p => `<button data-id="${p.id}" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex justify-between gap-3 text-sm"><span class="truncate">${esc(p.name)}</span><span class="text-slate-500 whitespace-nowrap">${naira(p.amount)}/${FQ[p.frequency]}</span></button>`).join('') : '<p class="px-4 py-3 text-sm text-slate-500">No matching plans</p>';
     gr.classList.remove('hidden');
     gr.querySelectorAll('button').forEach(b => b.onclick = () => { window._pl = all; openPlan(all.findIndex(p => p.id === b.dataset.id)); gr.classList.add('hidden'); gs.value = ''; });
   };
-  gs.onkeydown = e => { if (e.key === 'Enter') gr.querySelector('button')?.click(); if (e.key === 'Escape') { gr.classList.add('hidden'); gs.blur(); } };
+  gs.onkeydown = e => { if (e.key === 'Enter') gr.querySelector('button,a')?.click(); if (e.key === 'Escape') { gr.classList.add('hidden'); gs.blur(); } };
   addEventListener('click', e => { if (!e.target.closest('#gs,#gr')) gr.classList.add('hidden'); });
   addEventListener('keydown', e => {
     const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName), cur = window._cur;
@@ -392,15 +721,15 @@ function layout({ brand, nav, views, alias = {}, support = false, badges = null,
 
   const go = async () => {
     const [rawId, qs = ''] = (location.hash || '#' + nav[0][0]).slice(1).split('?'), v = views[rawId] ? rawId : nav[0][0], navId = alias[v] || v;
-    const same = location.hash === window._lh, y = scrollY;                       // refresh() keeps the page where it was
-    if (!same) { window._lh = location.hash; window._hf = {}; window._sel = new Set(); }                   // moving to another page forgets its filters
+    const same = location.hash === window._lh, y = scrollY; window._view = v;                       // refresh() keeps the page where it was
+    if (!same) { window._lh = location.hash; window._hf = {}; window._pg = {}; window._sel = new Set(); }                   // moving to another page forgets its filters
     document.querySelectorAll('.nl').forEach(a => { const on = a.dataset.id === navId; a.classList.toggle('bg-emerald-50', on); a.classList.toggle('text-emerald-800', on); a.classList.toggle('text-slate-600', !on); });
     $('#ttl').textContent = (nav.find(n => n[0] === navId) || nav[0])[1];
-    ALL = null; closePlan(); if (!same) scrollTo(0, 0);
+    ALL = null; closePlan(); if (!same) { scrollTo(0, 0); document.querySelectorAll('[data-ui="modal"]').forEach(x => x.remove()); }   // leaving a page closes its pop-ups
     if (!$('#ov').classList.contains('hidden')) tog();
     const m = $('#main'); if (!same) m.innerHTML = '<p class="text-sm text-slate-400">Loading…</p>';
     try { await views[v](m, new URLSearchParams(qs)); if (same) scrollTo(0, y); } catch (e) { m.innerHTML = `<p class="text-red-600 text-sm">${esc(e.message)}</p>`; }
-    updBadges(); updChip();
+    seenMark(navId); updBadges(); updChip();
   };
   const updChip = async () => { if (!chip) return; try { const t = await chip(); const el = $('#wbal'); if (el) el.textContent = t; } catch (e) { /* the balance chip is a convenience */ } };
 
@@ -416,16 +745,97 @@ function layout({ brand, nav, views, alias = {}, support = false, badges = null,
   };
 
   // real time: PocketBase pushes every change; the page re-renders itself, but never while someone is typing or has a pop-up open
-  let lt, bt;
+  let lt = null, bt = null, lastRun = 0;
+  const jit = (a, b) => a + Math.random() * (b - a);
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && /^(text|search|number|tel|email|password|url)$/.test(a.type))); };
   const busyUI = () => $('[data-ui]') || $('#dr') || typing();
-  const kick = () => { clearTimeout(lt); lt = setTimeout(function run() { if (busyUI()) { lt = setTimeout(run, 2000); return; } refresh(); }, 500); };
-  live.forEach(c => { const p = pb.collection(c).subscribe?.('*', e => { try { onLive?.(c, e); } catch (x) { } clearTimeout(bt); bt = setTimeout(() => { updBadges(); updChip(); }, 300); kick(); }); p?.catch?.(() => { }); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(); });   // catch up after the tab slept
-  setInterval(() => { if (!document.hidden) kick(); }, 90000);                              // safety net if a network blocks the live connection
+  // One re-draw is scheduled at a time (later changes ride along with it), never more often than minGap, and never while typing or in a pop-up.
+  // While someone is using the page (clicked, scrolled or typed in the last 20 s, or scrolled down), a live change does not re-draw it
+  // under them: a small "New updates" button appears instead and re-draws when tapped (or when they go to another page).
+  let lastUse = 0, pill = null;
+  ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach(ev => addEventListener(ev, () => { lastUse = Date.now(); }, { passive: true, capture: true }));
+  const hidePill = () => { if (pill) { pill.remove(); pill = null; } };
+  const showPill = () => {
+    if (pill || !document.body) return;
+    pill = document.createElement('button'); pill.type = 'button'; pill.textContent = '↻ New updates · tap to show';
+    pill.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:5.5rem;z-index:45;background:#0f172a;color:#fff;border-radius:9999px;padding:.5rem 1rem;font-size:.875rem;font-weight:500;box-shadow:0 10px 25px rgba(0,0,0,.25)';
+    pill.onclick = () => { hidePill(); lastRun = Date.now(); refresh(); };
+    document.body.appendChild(pill);
+  };
+  let drawnAt = 0;
+  addEventListener('hashchange', () => { hidePill(); if (Date.now() - (window._jjQuiet || 0) > 500) drawnAt = Date.now(); });   // drawn by the user (navigation or after an action)
+  const quiet = () => { window._jjQuiet = Date.now(); };
+  const kick = (delay = jit(300, 1200)) => {
+    if (lt) return;
+    lt = setTimeout(function run() {
+      if (busyUI()) { lt = setTimeout(run, 2000); return; }
+      lt = null;
+      if (Date.now() - drawnAt < 4000) return;                                    // the page was just drawn after the user's own action: already fresh
+      if (Date.now() - lastUse < 20000 || scrollY > 150) {                          // in use: don't re-draw under them
+        if (livePill) { showPill(); return; }                                       // admin: offer a "New updates" button
+        lt = setTimeout(run, 5000); return;                                         // members: quietly wait until they pause
+      }
+      lastRun = Date.now(); quiet(); refresh();
+    }, Math.max(delay, minGap - (Date.now() - lastRun)));
+  };
+  const side = () => { if (bt) return; bt = setTimeout(() => { bt = null; quiet(); updBadges(); updChip(); }, 1500); };   // counters and wallet chip, at most every 1.5 s
+  live.forEach(c => { const p = pb.collection(c).subscribe?.('*', e => {
+    try { onLive?.(c, e); } catch (x) { }
+    side();
+    const d = deps[window._view]; if (d && !d.includes(c)) return;                          // this page does not show that collection
+    kick(c === 'plans' && u.role !== 'admin' ? jit(1000, 8000) : undefined);                // a plan change reaches every member: spread their reloads out
+  }); p?.catch?.(() => { }); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) kick(jit(500, 4000)); });   // catch up after the tab slept
+  setInterval(() => { if (!document.hidden) kick(jit(0, 60000)); }, 300000);                             // safety net every ~5 min if a network blocks the live connection
 
   addEventListener('hashchange', go); go();
 }
+
+// ===== "new since you last looked" counters =====
+// Each page remembers when this browser last opened it; the counter beside it shows what is new since then (first visit: nothing).
+const seenKey = id => 'noble_seen:' + (pb.authStore.record?.id || '') + ':' + id;
+const seenAt = id => { try { let v = localStorage.getItem(seenKey(id)); if (!v) { v = new Date().toISOString(); localStorage.setItem(seenKey(id), v); } return v.replace('T', ' '); } catch (_) { return new Date().toISOString().replace('T', ' '); } };
+function seenMark(id) { try { localStorage.setItem(seenKey(id), new Date().toISOString()); } catch (_) { } }
+// number of records matching a filter (0 if the request fails: counters must never break a page)
+const countOf = (c, filter) => pb.collection(c).getList(1, 1, { filter, fields: 'id' }).then(r => r.totalItems).catch(() => 0);
+
+// ===== wallet history: money in and money out, organised =====
+// Entries made at the same moment for the same thing (e.g. 50 contributions or 50 registration fees taken together when joining
+// 50 times) become ONE line with the total and "× 50", the single entries inside. Money in and money out have their own columns,
+// with the balance left after each line. txs: wallet_txs, newest first.
+const WALLET_KIND = { topup: 'Deposit', contribution: 'Contribution', join: 'Registration (joining) fee', catchup: 'Catch-up', shirt: 'T-shirt fee', clearance: 'Clearance fee', reversal: 'Deposit reversed', deduction: 'Deducted by admin', refund: 'Refund' };
+function walletGroups(txs) {
+  const t = x => parseTs(x.created).getTime(), clusters = [];
+  txs.forEach(x => { const c = clusters[clusters.length - 1]; if (c && Math.abs(t(c[0]) - t(x)) <= 180000) c.push(x); else clusters.push([x]); });   // same moment: within 3 minutes
+  const out = [];
+  clusters.forEach(c => {
+    const by = new Map();
+    c.forEach(x => { const k = x.type + '|' + x.kind + '|' + String(x.note || '').replace(/[\d,₦]+/g, '#');
+      if (!by.has(k)) by.set(k, { type: x.type, kind: x.kind, note: x.note || '', items: [] }); by.get(k).items.push(x); });
+    by.forEach(g => { g.total = g.items.reduce((a, x) => a + (x.amount || 0), 0); g.created = g.items[0].created; g.balance = g.items[0].balance; out.push(g); });
+  });
+  return out;
+}
+function walletHistory(el, txs, { balance = null, key = 'w', more = '' } = {}) {
+  window._wf = window._wf || {}; const F = window._wf[key] || (window._wf[key] = { f: 'all' });
+  const inn = txs.filter(x => x.type === 'credit').reduce((a, x) => a + x.amount, 0), out = txs.filter(x => x.type !== 'credit').reduce((a, x) => a + x.amount, 0);
+  const reg = txs.filter(x => x.kind === 'join').reduce((a, x) => a + (x.type === 'credit' ? -1 : 1) * x.amount, 0), regN = txs.filter(x => x.kind === 'join' && x.type !== 'credit').length;
+  const card = (t, v, sub, cls = '') => `<div class="bg-white border rounded-xl p-4"><p class="text-xs font-medium text-slate-500">${t}</p><p class="text-xl font-semibold mt-1 ${cls}">${v}</p>${sub ? `<p class="text-xs text-slate-500 mt-0.5">${sub}</p>` : ''}</div>`;
+  const tm = x => date(x.created) + ' <span class="text-slate-400 text-xs whitespace-nowrap">' + new Date(parseTs(x.created)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '</span>';
+  const paint = () => {
+    const gs = walletGroups(txs).filter(g => F.f === 'all' || (F.f === 'in' ? g.type === 'credit' : F.f === 'out' ? g.type !== 'credit' : g.kind === 'join'));
+    const rows = gs.map(g => { const n = g.items.length, isIn = g.type === 'credit';
+      const desc = `<b class="text-slate-800">${WALLET_KIND[g.kind] || g.kind}</b>${n > 1 ? ` <span class="inline-flex px-1.5 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-800">× ${n}</span>` : ''}<span class="block text-xs text-slate-500 whitespace-normal">${esc(g.note)}${n > 1 && g.items.every(x => x.amount === g.items[0].amount) ? ' · ' + n + ' × ' + naira(g.items[0].amount) : ''}</span>`
+        + (n > 1 ? `<details class="mt-1"><summary class="cursor-pointer text-xs font-medium text-emerald-800">Show the ${n} entries</summary><div class="mt-1 border rounded-lg divide-y bg-white max-h-48 overflow-y-auto" style="min-width:14rem">${g.items.map(x => `<div class="flex justify-between gap-3 px-2 py-1 text-xs"><span class="text-slate-500">${new Date(parseTs(x.created)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span><span>${isIn ? '+' : '−'}${naira(x.amount)}</span><span class="text-slate-500">bal. ${naira(x.balance)}</span></div>`).join('')}</div></details>` : '');
+      return [tm(g), desc, isIn ? `<span class="font-semibold text-emerald-700">+${naira(g.total)}</span>` : '<span class="text-slate-300">—</span>', isIn ? '<span class="text-slate-300">—</span>' : `<span class="font-semibold text-red-600">−${naira(g.total)}</span>`, `<span class="font-medium">${naira(g.balance)}</span>`]; });
+    el.innerHTML = `<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">${card('Money in', '+' + naira(inn), 'Deposits, refunds and credits', 'text-emerald-700')}${card('Money out', '−' + naira(out), 'Contributions and fees', 'text-red-600')}${card('Registration (joining) fees', naira(reg), regN + ' paid')}${card('Balance now', naira(balance !== null ? balance : (txs[0] ? txs[0].balance : 0)), 'Left in the membership account')}</div>`
+      + `<div class="flex flex-wrap gap-1.5 mb-3">${[['all', 'All'], ['in', 'Money in'], ['out', 'Money out'], ['reg', 'Registration fees']].map(([k, l]) => `<button type="button" data-wf="${k}" class="px-3 py-1.5 rounded-full text-sm font-medium border ${F.f === k ? 'bg-emerald-800 text-white border-emerald-800' : 'bg-white text-slate-600 hover:bg-slate-100'}">${l}</button>`).join('')}</div>`
+      + (rows.length ? table(['Date', 'Details', 'Money in', 'Money out', 'Balance after'], rows) : '<div class="bg-white border border-dashed rounded-xl p-8 text-center text-slate-500 text-sm">Nothing here yet.</div>') + more;
+    el.querySelectorAll('[data-wf]').forEach(b => b.onclick = () => { F.f = b.dataset.wf; paint(); });
+  };
+  paint();
+}
+window.walletHistory = walletHistory;
 
 // ===== transaction history: payments + payouts in one list, date filters, PDF invoices and statements =====
 const CO = { name: "Nobles Groceries", phone: SUPPORT_PHONE };
@@ -458,13 +868,16 @@ window.dlInvoice = async key => {
   catch (e) { toast(e.message, 1); }
 };
 
-// o: { txs, cust (the member the history belongs to, or null for everyone), showUser, key (remembers filters across refreshes), extra(t) (extra action buttons), kinds }
+// o: { txs, cust (the member the history belongs to, or null for everyone), showUser, key (remembers filters across refreshes), extra(t) (extra action buttons), kinds,
+//      remote: async (F, page, per) => ({ txs, total })  -> filters run on the server and only one page is downloaded (used for large lists) }
 function txHistory(m, o) {
-  const { txs, cust = null, showUser = false, key = 'tx', extra = () => '', kinds = ['payment', 'payout'] } = o, multi = kinds.length > 1;
-  window.TXCUST = cust; txs.forEach(t => { t.no = invNo(t); TX[t.key] = t; });
-  if (!txs.length) { m.innerHTML = table([], []); return; }
+  const { txs = [], cust = null, showUser = false, key = 'tx', extra = () => '', kinds = ['payment', 'payout'], remote = null } = o, multi = kinds.length > 1, PER = 50;
+  const reg = l => l.forEach(t => { t.no = invNo(t); TX[t.key] = t; });
+  window.TXCUST = cust; reg(txs);
+  if (!remote && !txs.length) { m.innerHTML = table([], []); return; }
   window._hf = window._hf || {};
-  const F = window._hf[key] || (window._hf[key] = { from: '', to: '', status: 'all', kind: 'all', q: '' });
+  const F = window._hf[key] || (window._hf[key] = { from: '', to: '', status: 'all', kind: 'all', q: '', group: true });
+  if (F.group === undefined) F.group = true;
   const PRE = { all: ['All time', () => ['', '']], today: ['Today', () => [todayL(), todayL()]], 7: ['Last 7 days', () => [addDays(todayL(), -6), todayL()]], 30: ['Last 30 days', () => [addDays(todayL(), -29), todayL()]], month: ['This month', () => [todayL().slice(0, 8) + '01', todayL()]] };
   const lab = 'block text-xs font-medium text-slate-500';
   m.innerHTML = `<div class="bg-white border rounded-xl p-4 mb-4 space-y-3">
@@ -475,32 +888,66 @@ function txHistory(m, o) {
       ${multi ? `<label class="${lab}">Type<select id="hk" class="${inp} mt-1">${opts({ all: 'All types', payment: 'Payments', payout: 'Payouts' }, F.kind)}</select></label>` : ''}
       <label class="${lab}">Status<select id="hs" class="${inp} mt-1">${opts({ all: 'All statuses', pending: 'Pending', confirmed: 'Confirmed', rejected: 'Rejected' }, F.status)}</select></label>
     </div>
-    <div class="flex flex-wrap items-center gap-3"><div class="relative flex-1 min-w-[200px]"><span class="absolute left-3 top-2.5 text-slate-400">${ic(IC.search)}</span><input id="hq" value="${esc(F.q)}" placeholder="Search plan, reference or invoice no…" class="${inp} pl-10"></div><button type="button" id="hx" class="text-sm font-medium text-emerald-800 hover:underline">Clear filters</button></div></div>
+    <div class="flex flex-wrap items-center gap-3"><div class="relative flex-1 min-w-[200px]"><span class="absolute left-3 top-2.5 text-slate-400">${ic(IC.search)}</span><input id="hq" value="${esc(F.q)}" placeholder="Search plan, reference or invoice no…" class="${inp} pl-10"></div><label class="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer"><input id="hg" type="checkbox" ${F.group ? 'checked' : ''} class="w-4 h-4 rounded accent-emerald-700">Group payments made together</label><button type="button" id="hx" class="text-sm font-medium text-emerald-800 hover:underline">Clear filters</button></div></div>
     <div class="flex flex-wrap items-center justify-between gap-2 mb-3"><p id="hc" class="text-sm text-slate-500"></p><button type="button" id="hd" class="${btn2}">Download statement (PDF)</button></div><div id="hr"></div>`;
   const heads = ['Date', ...(showUser ? ['Member'] : []), ...(multi ? ['Type'] : []), 'Plan', 'Amount', 'Covers', 'Penalty', 'Note', 'Status', ''];
   const row = t => [date(t.created), ...(showUser ? [ulink(t.user)] : []), ...(multi ? [t.kind === 'payment' ? 'Payment' : 'Payout'] : []), esc(t.plan), naira(t.amount), t.covers || '—', t.penalty ? penBadge({ penalty: t.penalty }) : '—', esc(t.note) || '—', badge(t.status),
     extra(t) + `<button type="button" onclick="dlInvoice('${t.key}')" class="px-2.5 py-1 text-xs rounded-md border font-medium bg-white text-slate-700 hover:bg-slate-50">${t.kind === 'payment' ? 'Invoice' : 'Receipt'} (PDF)</button>`];
-  let cur = [];
-  const paint = () => {
+  // Payments for plans joined together (or taken in the same run) arrive as many lines at the same moment: show them as one line
+  // ("Grocery 4 weeks × 10", the total) with the single lines and their invoices inside. Same member, plan, type, status and note,
+  // within 2 minutes of each other.
+  const sameNote = n => String(n || '').replace(/\d+/g, '#');
+  const grouped = list => { if (!F.group) return list; const out = [];
+    list.forEach(t => { const g = out[out.length - 1], tu = t.user?.id || t.user || '';
+      if (g && g.kind === t.kind && g.status === t.status && g.plan === t.plan && g.uid === tu && g.nk === sameNote(t.note) && Math.abs(parseTs(g.items[g.items.length - 1].created) - parseTs(t.created)) < 120000) { g.items.push(t); return; }
+      out.push({ grp: true, kind: t.kind, status: t.status, plan: t.plan, uid: tu, nk: sameNote(t.note), user: t.user, note: t.note, created: t.created, items: [t] }); });
+    return out.map(g => g.items.length === 1 ? g.items[0] : Object.assign(g, { amount: g.items.reduce((a, x) => a + (x.amount || 0), 0), penalty: g.items.reduce((a, x) => a + (x.penalty || 0), 0) })); };
+  const rowAny = t => { if (!t.grp) return row(t);
+    const list = `<details class="mt-1 text-left whitespace-normal"><summary class="cursor-pointer text-xs font-medium text-emerald-800">Show the ${t.items.length} ${t.kind === 'payment' ? 'payments' : 'payouts'}</summary><div class="mt-1 border rounded-lg divide-y bg-white max-h-56 overflow-y-auto" style="min-width:16rem">${t.items.map(x => `<div class="flex items-center justify-between gap-3 px-2 py-1 text-xs"><span class="font-mono text-slate-500">${esc(x.no || '')}</span><span>${naira(x.amount)}</span>${extra(x)}<button type="button" onclick="dlInvoice('${x.key}')" class="px-2 py-0.5 rounded border bg-white">${x.kind === 'payment' ? 'Invoice' : 'Receipt'}</button></div>`).join('')}</div></details>`;
+    return [date(t.created), ...(showUser ? [ulink(t.user)] : []), ...(multi ? [t.kind === 'payment' ? 'Payments' : 'Payouts'] : []),
+      esc(t.plan) + ` <span class="inline-flex px-1.5 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-800">× ${t.items.length}</span>` + list,
+      naira(t.amount) + `<span class="block text-xs text-slate-500">${t.items.every(x => x.amount === t.items[0].amount) ? t.items.length + ' × ' + naira(t.items[0].amount) : t.items.length + ' payments'}</span>`,
+      t.items[0].covers ? t.items[0].covers + ' each' : '—', t.penalty ? penBadge({ penalty: t.penalty }) : '—', esc(t.note) || '—', badge(t.status), '']; };
+  let cur = [], page = 1, seq = 0;
+  const paintRemote = async () => {
+    const my = ++seq; $('#hr').innerHTML = '<p class="text-sm text-slate-400 py-6">Loading…</p>';
+    let r; try { r = await remote(F, page, PER); } catch (e) { if (my === seq) $('#hr').innerHTML = `<p class="text-sm text-red-600">${esc(e.message)}</p>`; return; }
+    if (my !== seq) return;                                    // a newer search has started
+    reg(r.txs); cur = r.txs; const pages = Math.max(1, Math.ceil(r.total / PER));
+    document.querySelectorAll('#hp button').forEach(b => { const [f, t] = PRE[b.dataset.p][1](), on = f === F.from && t === F.to; b.className = 'whitespace-nowrap px-3 py-1.5 rounded-full text-sm font-medium border ' + (on ? 'bg-emerald-800 text-white border-emerald-800' : 'bg-white text-slate-600 hover:bg-slate-100'); });
+    $('#hc').innerHTML = `<b class="text-slate-700">${r.total.toLocaleString()}</b> transactions match`;
+    $('#hr').innerHTML = (cur.length ? table(heads, grouped(cur).map(rowAny)) : '<div class="bg-white border border-dashed rounded-xl p-10 text-center text-slate-500 text-sm">No transactions match. Try a wider date range or clear the filters.</div>')
+      + (r.total > PER ? `<div class="flex flex-wrap items-center justify-between gap-3 mt-4 text-sm text-slate-500"><span>Page ${page} of ${pages.toLocaleString()}</span><span class="flex gap-2"><button data-pg="${page - 1}" ${page > 1 ? '' : 'disabled'} class="${pgBtn}">← Previous</button><button data-pg="${page + 1}" ${page < pages ? '' : 'disabled'} class="${pgBtn}">Next →</button></span></div>` : '');
+    $('#hr').querySelectorAll('[data-pg]').forEach(b => b.onclick = () => { page = +b.dataset.pg; paintRemote(); });
+  };
+  let qt;
+  const paint = (fromSearch) => {
+    if (remote) { page = 1; clearTimeout(qt); if (fromSearch) qt = setTimeout(paintRemote, 350); else paintRemote(); return; }
     const q = F.q.trim().toLowerCase();
     cur = txs.filter(t => { const d = lagosDay(t.created); return (!F.from || d >= F.from) && (!F.to || d <= F.to) && (F.status === 'all' || t.status === F.status) && (F.kind === 'all' || t.kind === F.kind) && (!q || [t.plan, t.note, t.no, t.user?.name, t.user?.email].join(' ').toLowerCase().includes(q)); });
     document.querySelectorAll('#hp button').forEach(b => { const [f, t] = PRE[b.dataset.p][1](), on = f === F.from && t === F.to; b.className = 'whitespace-nowrap px-3 py-1.5 rounded-full text-sm font-medium border ' + (on ? 'bg-emerald-800 text-white border-emerald-800' : 'bg-white text-slate-600 hover:bg-slate-100'); });
     const saved = cur.filter(t => t.kind === 'payment' && t.status === 'confirmed').reduce((a, t) => a + t.amount - t.penalty, 0);
     $('#hc').innerHTML = `<b class="text-slate-700">${cur.length}</b> of ${txs.length} transactions` + (cur.some(t => t.kind === 'payment') ? ` · Confirmed savings <b class="text-slate-700">${naira(saved)}</b>` : '');
-    $('#hr').innerHTML = cur.length ? table(heads, cur.map(row)) : '<div class="bg-white border border-dashed rounded-xl p-10 text-center text-slate-500 text-sm">No transactions match. Try a wider date range or clear the filters.</div>';
+    $('#hr').innerHTML = cur.length ? table(heads, grouped(cur).map(rowAny)) : '<div class="bg-white border border-dashed rounded-xl p-10 text-center text-slate-500 text-sm">No transactions match. Try a wider date range or clear the filters.</div>';
   };
   $('#hp').onclick = e => { const b = e.target.closest('button'); if (!b) return; [F.from, F.to] = PRE[b.dataset.p][1](); $('#hf').value = F.from; $('#ht').value = F.to; paint(); };
   $('#hf').onchange = e => { F.from = e.target.value; if (F.to && F.from > F.to) { F.to = F.from; $('#ht').value = F.to; } paint(); };
   $('#ht').onchange = e => { F.to = e.target.value; if (F.from && F.from > F.to && F.to) { F.from = F.to; $('#hf').value = F.from; } paint(); };
   $('#hs').onchange = e => { F.status = e.target.value; paint(); };
+  $('#hg').onchange = e => { F.group = e.target.checked; paint(); };
   if (multi) $('#hk').onchange = e => { F.kind = e.target.value; paint(); };
-  $('#hq').oninput = e => { F.q = e.target.value; paint(); };
-  $('#hx').onclick = () => { Object.assign(F, { from: '', to: '', status: 'all', kind: 'all', q: '' }); txHistory(m, o); };
+  $('#hq').oninput = e => { F.q = e.target.value; paint(true); };
+  $('#hx').onclick = () => { Object.assign(F, { from: '', to: '', status: 'all', kind: 'all', q: '', group: true }); txHistory(m, o); };
   $('#hd').onclick = async () => {
-    if (!cur.length) return toast('There are no transactions in this range to download.', 1);
+    let list = cur;
     try {
+      if (remote) {                                              // the statement covers every match, not just this page (up to 5,000)
+        toast('Gathering transactions…'); const r = await remote(F, 1, 5000); list = r.txs; reg(list);
+        if (r.total > 5000) toast('Only the first 5,000 transactions fit in one statement. Narrow the dates for the rest.', 1, 6000);
+      }
+      if (!list.length) return toast('There are no transactions in this range to download.', 1);
       toast('Preparing your PDF…'); const [J, logo] = await Promise.all([loadPDF(), logoData()]);
-      buildStatement(J, { txs: cur, cust, showUser, from: F.from, to: F.to }, logo, CO).save('Statement-' + (cust?.name || 'all-members').replace(/[^a-z0-9]+/gi, '-') + '-' + todayL() + '.pdf');
+      buildStatement(J, { txs: list, cust, showUser, from: F.from, to: F.to }, logo, CO).save('Statement-' + (cust?.name || 'all-members').replace(/[^a-z0-9]+/gi, '-') + '-' + todayL() + '.pdf');
     } catch (e) { toast(e.message, 1); }
   };
   paint();
